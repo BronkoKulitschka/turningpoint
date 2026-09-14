@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 570" fill="none">
+<defs><linearGradient id="wall" x1="180" y1="110" x2="410" y2="350" gradientUnits="userSpaceOnUse"><stop stop-color="#b5ad91"/><stop offset="1" stop-color="#8c9179"/></linearGradient><linearGradient id="glass"><stop stop-color="#f0d08c"/><stop offset="1" stop-color="#bf8b4d"/></linearGradient><linearGradient id="beam" x1="210" y1="280" x2="440" y2="420" gradientUnits="userSpaceOnUse"><stop stop-color="#eaca7e" stop-opacity=".33"/><stop offset="1" stop-color="#eaca7e" stop-opacity="0"/></linearGradient></defs>
+<!-- Cutaway room and the thick concrete plinth. -->
+<path d="M85 342 366 182 683 364 401 530Z" fill="#172720" opacity=".4"/>
+<path d="M95 334 365 178 670 355 400 512Z" fill="#b0ae93"/>
+<path d="M95 334 400 512 400 528 95 350Z" fill="#757b65"/><path d="M400 512 670 355 670 371 400 528Z" fill="#555f50"/>
+<path d="M95 334V137L365 0V178Z" fill="url(#wall)" transform="translate(0 70) scale(1 .79)"/>
+<path d="M365 70 670 246 670 355 365 179Z" fill="#6e7b69"/>
+<path d="M95 178 365 23 670 200 670 215 365 39 95 194Z" fill="#696b53"/>
+<path d="M95 194 365 39V62L95 218Z" fill="#a1a082"/>
+<path d="M365 39 670 215V232L365 62Z" fill="#4b594a"/>
+<!-- Wall mortar, ceiling posts, and worn floor joints. -->
+<g stroke="#666f58" stroke-width="1" opacity=".23"><path d="M96 257 365 101M96 290 365 134M96 323 365 167M150 226V254M250 168V196M198 231V260M310 166V194"/><path d="M179 382 451 225M266 432 538 276M350 482 623 327M178 288 484 465M268 235 575 413"/></g>
+<path d="M358 43V182L370 188V51Z" fill="#665d44"/><path d="M641 215V340L652 347V221Z" fill="#58634d"/>
+<!-- Window with crossbars, warm reflected sunlight. -->
+<path d="M126 189 243 122V241L126 309Z" fill="#545d48"/><path d="M135 192 235 135V235L135 293Z" fill="url(#glass)"/>
+<path d="M184 164V265M135 243 235 186" stroke="#6e6d51" stroke-width="7"/>
+<path d="M126 308 243 240 252 246 136 315Z" fill="#c7b386"/>
+<path d="M135 293 235 235 590 361 435 451Z" fill="url(#beam)"/>
+<path d="M141 298 179 276 360 378 320 401ZM189 271 231 247 411 349 368 374Z" fill="#edcb81" opacity=".16"/>
+<!-- Old shop sign and job board. -->
+<path d="M419 99 594 201V237L419 136Z" fill="#b4b495"/><path d="M425 108 589 203V229L425 135Z" stroke="#646f57"/>
+<g transform="matrix(.87 .5 0 1 432 117)" fill="#46573f" font-family="Georgia,serif"><text font-size="10">MECHANIK &amp; DREHTEILE</text><text y="14" font-size="9" letter-spacing="2">H. WAGNER</text></g>
+<path d="M269 163 332 127V201L269 238Z" fill="#73664a"/><path d="M274 166 327 136V197L274 227Z" fill="#a08e60"/><path d="M281 173 299 162V191L281 202Z" fill="#e7dfbd"/><path d="M304 170 322 160V190L304 200Z" fill="#cdc8a8"/><path d="M288 205 315 190V206L288 221Z" fill="#dcc795"/>
+<!-- Workbench, steel drawers, handles and little radio. -->
+<path d="M451 252 557 313 557 397 451 336Z" fill="#53664f"/><path d="M557 313 624 275 624 359 557 397Z" fill="#354e3e"/>
+<path d="M439 250 508 210 635 282 566 323Z" fill="#a28859"/><path d="M439 250V262L566 335V323Z" fill="#78613f"/><path d="M566 323 635 282V293L566 335Z" fill="#665d3c"/>
+<g stroke="#263d30" stroke-width="2"><path d="M463 282 543 328M463 307 543 353M463 332 543 378"/></g><g stroke="#b7b899" stroke-width="3"><path d="M494 304 510 313M494 330 510 339M494 355 510 364"/></g>
+<path d="M530 239V213L560 230V256Z" fill="#776a4c"/><path d="M530 213 545 205 575 222 560 230Z" fill="#b3a079"/><path d="M560 230 575 222V248L560 256Z" fill="#4e5540"/><path d="M535 222 548 229V242L535 235Z" fill="#353f33"/><ellipse cx="554" cy="243" rx="3" ry="4" fill="#dbc593"/><path d="M568 219 579 185" stroke="#b2bba0" stroke-width="2"/>
+<path d="M471 246 495 232 521 247 497 261Z" fill="#d9ceaa"/><path d="M477 245 496 234 511 243 492 254Z" fill="#efe3bf"/>
+<!-- Pegboard and real tool silhouettes. -->
+<path d="M446 159 523 204V252L446 208Z" fill="#55694f"/>
+<g stroke="#a5b092" stroke-width="3" stroke-linecap="round"><path d="M459 178V205M474 187V215M490 196V224M507 205V233"/><path d="M455 174 459 181 463 179M470 183 474 190 478 188M486 192 494 197M502 202 512 208"/></g>
+<!-- Lathe feet. -->
+<path d="M238 341 275 362V425L239 404Z" fill="#3a5942"/><path d="M275 362 307 343V406L275 425Z" fill="#294b37"/>
+<path d="M378 350 415 372V438L378 416Z" fill="#45684a"/><path d="M415 372 445 354V420L415 438Z" fill="#294b37"/>
+<path d="M232 403 273 427 311 405V415L273 439 232 414Z" fill="#394b3b"/><path d="M372 418 414 442 449 421V431L414 453 372 429Z" fill="#394b3b"/>
+<!-- Lathe bed with exposed parallel ways. -->
+<path d="M211 302 269 268 461 379 403 413Z" fill="#729168"/><path d="M211 302V322L403 433V413Z" fill="#4a7c59"/><path d="M403 413 461 379V399L403 433Z" fill="#35513d"/>
+<path d="M242 299 258 290 435 392 419 401Z" fill="#b5b9a6"/><path d="M267 285 277 279 454 381 444 387Z" fill="#899e91"/>
+<path d="M257 298 264 294 431 390 424 394Z" fill="#344c3f"/>
+<!-- Headstock and gearbox. -->
+<path d="M219 263 255 243 293 265 257 286Z" fill="#799466"/><path d="M219 263V310L257 333V286Z" fill="#527b51"/><path d="M257 286 293 265V313L257 333Z" fill="#345c40"/>
+<path d="M225 288 246 300V317L225 305Z" fill="#345a3c"/><path d="M229 293 242 301" stroke="#a9b78f" stroke-width="2"/><ellipse cx="232" cy="282" rx="4" ry="6" fill="#c3c7a5"/><ellipse cx="245" cy="289" rx="3" ry="4" fill="#dbc77e"/>
+<path d="M261 298 271 282 285 278 301 290 299 307 286 318 271 311Z" fill="#a4b0a0"/><path d="M280 294 288 282 301 290 304 303 294 315 283 310Z" fill="#70877b"/><ellipse cx="293" cy="299" rx="6" ry="9" fill="#354d42"/>
+<path d="M293 296 351 330" stroke="#bdc1ad" stroke-width="9"/>
+<!-- Tailstock, carriage, cross-slide, toolpost and handwheels. -->
+<path d="M383 350 404 338 428 352 407 364Z" fill="#96a67d"/><path d="M383 350V379L407 393V364Z" fill="#5b8053"/><path d="M407 364 428 352V382L407 393Z" fill="#365c40"/><path d="M383 351 363 339" stroke="#b5baa2" stroke-width="6"/>
+<path d="M310 337 347 316 379 334 342 356Z" fill="#7d9280"/><path d="M310 337V350L342 369V356Z" fill="#577761"/><path d="M342 356 379 334V347L342 369Z" fill="#384e42"/>
+<path d="M327 329 344 319 358 327 342 337Z" fill="#b7b69c"/><path d="M327 329V315L342 324V337Z" fill="#758b77"/><path d="M327 315 343 306 358 314 342 324Z" fill="#a5af98"/><path d="M342 324 358 314V327L342 337Z" fill="#4e6453"/><path d="M342 313V298" stroke="#2a4136" stroke-width="4"/><path d="M333 301 351 311" stroke="#263e32" stroke-width="4" stroke-linecap="round"/>
+<path d="M319 355V381L345 396V370Z" fill="#41664a"/><g stroke="#bac0a3" stroke-width="3"><ellipse cx="331" cy="379" rx="9" ry="12"/><path d="M331 367V391M323 373 339 386"/><ellipse cx="432" cy="379" rx="7" ry="10"/></g><path d="M331 379 319 386" stroke="#303f32" stroke-width="4" stroke-linecap="round"/>
+<!-- Adjustable lamp with pool of light. -->
+<path d="M278 266V222L304 203" stroke="#2c4235" stroke-width="5" stroke-linecap="round"/><circle cx="278" cy="222" r="5" fill="#9aa684"/><path d="M297 204 318 195 330 213 308 225Z" fill="#41613d"/><path d="M308 225 330 213 335 218 313 231Z" fill="#eacb7c"/>
+<!-- Wooden crate, a broom, metal curls and sleepy workshop cat. -->
+<path d="M143 341 176 322 209 341 176 360Z" fill="#a78a53"/><path d="M143 341V367L176 387V360Z" fill="#947545"/><path d="M176 360 209 341V367L176 387Z" fill="#6b613e"/><path d="M147 350 173 365M147 360 173 375" stroke="#b49a68" stroke-width="2"/>
+<path d="M602 341 617 257" stroke="#af9769" stroke-width="4"/><path d="M593 337 611 347 613 366 587 352Z" fill="#b7aa75"/>
+<g stroke="#b3b9a2" stroke-width="2" opacity=".7"><path d="M315 428q9-8 12 3t13-3M352 444q8-8 10 2t12 1M305 442l8 3m26-16 8 5"/></g>
+<ellipse cx="521" cy="425" rx="33" ry="17" fill="#4c5943" opacity=".4"/><ellipse cx="521" cy="419" rx="25" ry="13" fill="#b2915c"/><ellipse cx="502" cy="414" rx="12" ry="11" fill="#bea16d"/><path d="M491 410 490 397 500 405M507 405 515 400 513 413" fill="#bea16d"/><path d="M533 415q23 6 7 14t-25-5" stroke="#d0b17a" stroke-width="6" stroke-linecap="round"/><path d="M495 415h4m5 0h4" stroke="#51543c" stroke-width="1.5" stroke-linecap="round"/>
+</svg>
