@@ -17,17 +17,17 @@ function app(values=new Map()) {
  vm.runInNewContext(source,context);
  const click=(action,slot,mode)=>element('panel').handlers.click({target:{closest:()=>({dataset:{action,slot,mode},disabled:false})}});
  const start=(name='Testwerkstatt',slot='1')=>{click('new');element('owner').value='Robin';element('workshop').value=name;element('first-slot').value=slot;element('panel').handlers.submit({target:{id:'new-form'},preventDefault(){}});};
- const note=text=>element('panel').handlers.input({target:{id:'journal-note',value:text}});
- return {click,start,note,values,element,html:()=>element('panel').innerHTML,read:id=>JSON.parse(values.get('turningpoint.save.v1.'+id)),importFile:async data=>element('import-file').handlers.change({target:{files:[{size:data.length,text:async()=>data}]}})};
+ return {click,start,values,element,html:()=>element('panel').innerHTML,read:id=>JSON.parse(values.get('turningpoint.save.v1.'+id)),importFile:async data=>element('import-file').handlers.change({target:{files:[{size:data.length,text:async()=>data}]}})};
 }
-test('Menüablauf: neues Spiel, Notiz, Autosave, manueller Snapshot und Laden',()=>{
- const a=app();assert.match(a.html(),/Neues Spiel/);a.start();assert.equal(a.read('1').state.workshopName,'Testwerkstatt');
- a.note('Meine erste Notiz');a.click('home');assert.equal(a.read('auto').state.note,'Meine erste Notiz');
- a.click('save');a.click('write','2','save');assert.equal(a.read('2').state.note,'Meine erste Notiz');
- a.click('continue');a.note('Neuere Notiz');a.click('home');assert.equal(a.read('auto').state.note,'Neuere Notiz');
+test('Menüablauf: neues Spiel, Autosave, manueller Snapshot und Laden',()=>{
+ const a=app();assert.match(a.html(),/Neues Spiel/);a.start('Erste Werkstatt');assert.equal(a.read('1').state.workshopName,'Erste Werkstatt');
+ assert.equal(a.read('auto').state.workshopName,'Erste Werkstatt');assert.equal(a.read('auto').state.note,undefined);
+ assert.doesNotMatch(a.html(),/textarea|journal-note|Werkstattnotiz/);
+ a.click('save');a.click('write','2','save');assert.equal(a.read('2').state.workshopName,'Erste Werkstatt');
+ a.start('Zweite Werkstatt','3');assert.equal(a.read('auto').state.workshopName,'Zweite Werkstatt');
  a.click('load');a.click('read','2');assert.match(a.html(),/Spielstand laden\?/);a.click('confirm');
- assert.equal(a.read('auto').state.note,'Meine erste Notiz');assert.match(a.html(),/Meine erste Notiz/);
- const restart=app(a.values);restart.click('continue');assert.match(restart.html(),/Meine erste Notiz/);
+ assert.equal(a.read('auto').state.workshopName,'Erste Werkstatt');assert.match(a.html(),/Erste Werkstatt/);
+ const restart=app(a.values);restart.click('continue');assert.match(restart.html(),/Erste Werkstatt/);
 });
 test('Belegten Platz erst nach Bestätigung ändern; Abbrechen erhält Original',()=>{
  const a=app();a.start('Erste Werkstatt');a.start('Zweite Werkstatt');
@@ -36,8 +36,15 @@ test('Belegten Platz erst nach Bestätigung ändern; Abbrechen erhält Original'
  a.click('load');a.click('delete','1','load');a.click('cancel');assert.equal(a.read('1').state.workshopName,'Zweite Werkstatt');
 });
 test('Import zuerst prüfen und Ziel wählen; ungültiger Import lässt vorhandene Stände erhalten',async()=>{
- const a=app();a.start();a.note('Exportierte Notiz');a.click('home');const backup=JSON.stringify(a.read('auto'));
+ const a=app();a.start('Exportierte Werkstatt');a.click('home');const backup=JSON.stringify(a.read('auto'));
  const b=app();await b.importFile(backup);assert.match(b.html(),/Sicherung übernehmen/);assert.equal(b.values.size,0);
- b.click('write','3','import');assert.equal(b.read('3').state.note,'Exportierte Notiz');
+ b.click('write','3','import');assert.equal(b.read('3').state.workshopName,'Exportierte Werkstatt');
  const old=b.values.get('turningpoint.save.v1.3');await b.importFile('{invalid');assert.equal(b.values.get('turningpoint.save.v1.3'),old);assert.match(b.element('toast').textContent,/gültiges JSON/);
+});
+
+test('Update-002-Sicherung bleibt ladbar, ohne ein Notizfeld anzuzeigen',async()=>{
+ const old=app();old.start('Alte Werkstatt');const backup=old.read('1');backup.state.note='Vor dem Update gespeicherter Text';
+ const updated=app();await updated.importFile(JSON.stringify(backup));updated.click('write','2','import');
+ assert.match(updated.html(),/Alte Werkstatt/);assert.doesNotMatch(updated.html(),/textarea|journal-note|Werkstattnotiz|Vor dem Update gespeicherter Text/);
+ assert.equal(updated.read('2').state.note,backup.state.note);
 });

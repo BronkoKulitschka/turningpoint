@@ -6,7 +6,7 @@ const sample = () => makeSave(newState('Opas Werkstatt','Robin'));
 test('Manuelle Sicherung ist ein unveränderlicher Snapshot; Autosave darf weiterlaufen',()=>{
  const storage=memory(),store=createStore(storage),save=sample();store.write('1',save);
  save.state.note='Erste Notiz';store.write('auto',makeSave(save.state));
- assert.equal(store.read('1').save.state.note,'');assert.equal(store.read('auto').save.state.note,'Erste Notiz');
+ assert.equal(store.read('1').save.state.note,undefined);assert.equal(store.read('auto').save.state.note,'Erste Notiz');
  const restarted=createStore(storage);assert.equal(restarted.read('auto').save.state.note,'Erste Notiz');
  restarted.remove('1');assert.equal(restarted.read('1').status,'empty');assert.equal(restarted.read('auto').status,'ok');
 });

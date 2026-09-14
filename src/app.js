@@ -1,4 +1,4 @@
-import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=002';
+import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=003';
 
 const $ = s => document.querySelector(s);
 const panel = $('#panel');
@@ -20,17 +20,18 @@ function show(html, number, nextView) {
   panel.focus({preventScroll:true});
 }
 function button(action, title, symbol, primary = false, disabled = false, subtitle = '') {
-  return `<button class="action ${primary ? 'primary' : ''}" data-action="${action}" ${disabled ? 'disabled' : ''}><span class="symbol" aria-hidden="true">${symbol}</span><span>${title}${subtitle ? `<small>${escape(subtitle)}</small>` : ''}</span><span class="arrow" aria-hidden="true">↗</span></button>`;
+  const number = { continue: '01', new: '02', load: '03', save: '04' }[action] || '•';
+  return `<button class="action ${primary ? 'primary' : ''}" data-action="${action}" ${disabled ? 'disabled' : ''}><span class="menu-index" aria-hidden="true">${number}</span><span>${title}${subtitle ? `<small>${escape(subtitle)}</small>` : ''}</span><span class="menu-end" aria-hidden="true">›</span></button>`;
 }
-const back = () => '<button class="back" data-action="home">← Zum Startmenü</button>';
+const back = () => '<button class="back" data-action="home">← Hauptmenü</button>';
 function home() {
   const latest = store.latest();
-  show(`<h2>Willkommen zurück.</h2><p class="description">Hier beginnt deine eigene Werkstattgeschichte.<br>Nimm dir die Zeit, die du brauchst.</p><div class="menu">
-    ${button('continue', current ? 'Zur Werkstatt' : 'Fortsetzen', '▷', !!(current || latest), !(current || latest), current?.workshopName || latest?.save.state.workshopName || '')}
-    ${button('new', 'Neues Spiel', '+', !(current || latest))}
-    ${button('load', 'Spiel laden', '▤')}
-    ${button('save', 'Spiel speichern', '↓', false, !current)}
-    </div><div class="divider">DEINE SICHERUNG</div><div class="backup-row"><button class="small-btn" data-action="export" ${!current && !latest ? 'disabled' : ''}>↗ Datei exportieren</button><button class="small-btn" data-action="import">↙ Datei importieren</button></div><p class="hint">Drei Speicherplätze + Autosave. Eine exportierte Datei sichert deinen Stand auch außerhalb dieses Browsers.</p>`, '01 / START', 'home');
+  show(`<h2>Hauptmenü</h2><div class="menu">
+    ${button('continue', current ? 'Zur Werkstatt' : 'Fortsetzen', '', !!(current || latest), !(current || latest), current?.workshopName || latest?.save.state.workshopName || '')}
+    ${button('new', 'Neues Spiel', '', !(current || latest))}
+    ${button('load', 'Spiel laden', '')}
+    ${button('save', 'Spiel speichern', '', false, !current)}
+    </div><div class="divider">SPIELSTAND SICHERN</div><div class="backup-row"><button class="small-btn" data-action="export" ${!current && !latest ? 'disabled' : ''}>Datei exportieren</button><button class="small-btn" data-action="import">Datei importieren</button></div><p class="hint">3 Speicherplätze + Autosave. Export für eine Sicherung außerhalb dieses Browsers.</p>`, '01 / START', 'home');
 }
 function confirmAction(title, message, label, callback, cancel) {
   pending = callback; cancelled = cancel;
@@ -44,11 +45,11 @@ function setCurrent(save) {
   clearTimeout(autoTimer); current = structuredClone(save.state); dirty = false; autoSuspended = false;
   try { store.write('auto', makeSave(current)); $('#storage-status').textContent = 'Automatisch auf diesem Gerät gespeichert.'; }
   catch(e) { dirty = true; toast(e.message, true); $('#storage-status').textContent = 'Nicht gespeichert – bitte Sicherung exportieren.'; }
-  journal();
+  workshopSummary();
 }
-function journal() {
+function workshopSummary() {
   if (!current) return home();
-  show(`${back()}<span class="tag">KAPITEL 01 · DAS ERBE</span><h2 class="workspace-name" style="margin-top:15px">${escape(current.workshopName)}</h2><p class="description">In guten Händen bei ${escape(current.ownerName)}.</p><div class="entry"><p>„Die alte Drehbank läuft noch. Im Schrank findest du mein Werkzeug. Alles andere lernst du mit der Zeit.“</p><div class="meta"><span>OPAS ERSTE NOTIZ</span><span>1 WERKSTATT · 1 ANFANG</span></div></div><label class="field" for="journal-note">Deine erste Werkstattnotiz</label><textarea id="journal-note" maxlength="2000" placeholder="Was möchtest du als Erstes aus deiner Werkstatt machen?">${escape(current.note)}</textarea><p class="autosave" id="auto-label">${dirty ? 'Noch nicht automatisch gespeichert.' : 'Deine Notiz wird automatisch gespeichert.'}</p><div class="form-actions"><button class="small-btn primary" data-action="save">Spiel speichern</button><button class="small-btn" data-action="export">Sicherung exportieren</button></div><p class="hint">Der Anfang ist gemacht. Die spielbare Werkstatt entsteht im nächsten Entwicklungsschritt.</p>`, '03 / DEINE WERKSTATT', 'journal');
+  show(`${back()}<div class="chapter-heading"><h2>Betriebsakte</h2><span class="tag">KAPITEL 01</span></div><div class="workshop-card"><img src="./assets/workshop.svg" alt="Opas Werkstatt mit der alten grünen Drehbank"><dl><div><dt>Werkstatt</dt><dd>${escape(current.workshopName)}</dd></div><div><dt>Inhaber</dt><dd>${escape(current.ownerName)}</dd></div><div><dt>Begonnen</dt><dd>${new Intl.DateTimeFormat('de-DE', {dateStyle:'medium'}).format(new Date(current.createdAt))}</dd></div></dl></div><p class="autosave" id="auto-label">${dirty ? 'Noch nicht automatisch gespeichert.' : '✓ Spielstand automatisch gesichert.'}</p><div class="form-actions"><button class="small-btn primary" data-action="save">Spiel speichern</button><button class="small-btn" data-action="export">Datei exportieren</button></div><p class="hint">Die spielbare Werkstatt folgt in einem weiteren Update.</p>`, '03 / BETRIEBSAKTE', 'workshop');
 }
 function flushAuto() {
   clearTimeout(autoTimer);
@@ -93,12 +94,6 @@ function exportSave(save) {
   download(JSON.stringify(valid,null,2),`turningpoint-spielstand-${name}-${new Date().toISOString().replace(/[:.]/g,'-')}.json`);
 }
 
-panel.addEventListener('input', e => {
-  if(e.target.id!=='journal-note' || !current) return;
-  current.note=e.target.value; current.updatedAt=new Date().toISOString(); dirty=true;
-  $('#auto-label').textContent=autoSuspended ? 'Anderer Tab aktiv. Bitte manuell auf einem Speicherplatz sichern.' : 'Wird gespeichert …';
-  clearTimeout(autoTimer); autoTimer=setTimeout(flushAuto,500);
-});
 panel.addEventListener('submit', e => {
   if(e.target.id!=='new-form') return; e.preventDefault();
   const values={owner:$('#owner').value.trim(),workshop:$('#workshop').value.trim(),slot:$('#first-slot').value};
@@ -113,7 +108,7 @@ panel.addEventListener('click', e => {
     switch(b.dataset.action) {
       case 'home': flushAuto(); home(); break;
       case 'new': flushAuto(); newGame(); break;
-      case 'continue': if(current) journal(); else {const r=store.latest(); if(r) setCurrent(r.save);} break;
+      case 'continue': if(current) workshopSummary(); else {const r=store.latest(); if(r) setCurrent(r.save);} break;
       case 'load': flushAuto(); slots('load'); break;
       case 'save': flushAuto(); slots('save'); break;
       case 'read': { const r=store.read(id); if(r.status!=='ok') throw new Error('Dieser Spielstand kann nicht geladen werden.');

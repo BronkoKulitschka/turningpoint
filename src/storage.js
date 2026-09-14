@@ -9,12 +9,14 @@ export function validateSave(value) {
   }
   const s = value.state;
   if (!s || !text(s.id, 100) || !text(s.workshopName, 40) || !text(s.ownerName, 40) ||
-      !text(s.note, 2000, true) || s.chapter !== 1 || !date(s.createdAt) || !date(s.updatedAt) || !date(value.savedAt)) {
+      (s.note !== undefined && !text(s.note, 2000, true)) || s.chapter !== 1 || !date(s.createdAt) || !date(s.updatedAt) || !date(value.savedAt)) {
     throw new Error('Der Spielstand ist unvollständig oder beschädigt.');
   }
   // Nur bekannte Felder übernehmen, keine fremden Objekte oder HTML ausführen.
   return { game: 'turningpoint', version: 1, savedAt: value.savedAt, state: {
-    id: s.id, workshopName: s.workshopName.trim(), ownerName: s.ownerName.trim(), note: s.note,
+    id: s.id, workshopName: s.workshopName.trim(), ownerName: s.ownerName.trim(),
+    // Alte Sicherungen aus Update 002 bleiben verlustfrei lesbar.
+    ...(s.note !== undefined ? { note: s.note } : {}),
     chapter: 1, createdAt: s.createdAt, updatedAt: s.updatedAt,
   } };
 }
@@ -26,7 +28,7 @@ export function makeSave(state) {
 export function newState(workshopName, ownerName) {
   const now = new Date().toISOString();
   return { id: crypto.randomUUID(), workshopName: workshopName.trim(), ownerName: ownerName.trim(),
-    note: '', chapter: 1, createdAt: now, updatedAt: now };
+    chapter: 1, createdAt: now, updatedAt: now };
 }
 
 export function createStore(storage) {
