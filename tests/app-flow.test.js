@@ -21,7 +21,7 @@ function app(values=new Map()) {
  const tick=ms=>{clock+=ms;intervals[0]();};
  const menu=()=>element('workshop-app').handlers.click({target:{closest:()=>({dataset:{openMenu:''},disabled:false})}});
  const hold=direction=>element('workshop-app').handlers.pointerdown({target:{closest:()=>({dataset:{feed:String(direction)},disabled:false})},preventDefault(){},button:0,pointerId:1});
- const release=(type='pointerup')=>(windowEvents[type]??[]).forEach(fn=>fn({}));
+ const release=(type='pointerup',event={})=>(windowEvents[type]??[]).forEach(fn=>fn({...event,type}));
  return {click,start,work,tick,menu,values,element,hold,release,html:()=>element('panel').innerHTML+element('workshop-app').innerHTML,read:id=>JSON.parse(values.get('turningpoint.save.v1.'+id)),importFile:async data=>element('import-file').handlers.change({target:{files:[{size:data.length,text:async()=>data}]}})};
 }
 test('Menüablauf: neues Spiel, Autosave, manueller Snapshot und Laden',()=>{
@@ -55,7 +55,7 @@ test('Update-002-Sicherung bleibt ladbar, ohne ein Notizfeld anzuzeigen',async()
 });
 
 test('Halten schneidet, Loslassen stoppt und das Menü pausiert die Maschine',()=>{
- const a=app();a.start('Spielbare Werkstatt');a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('start');
+ const a=app();a.start('Spielbare Werkstatt');a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('depth',.5);a.work('start');
  a.tick(1000);assert.equal(a.read('auto').state.workshop.orders[0].progress,0);
  a.hold(1);a.tick(1000);a.release();const after=a.read('auto').state.workshop.orders[0];assert.ok(after.piece.diameters.some(d=>d<24));assert.equal(after.piece.feeding,0);
  a.tick(1000);assert.deepEqual(a.read('auto').state.workshop.orders[0].piece.diameters,after.piece.diameters);
@@ -63,21 +63,27 @@ test('Halten schneidet, Loslassen stoppt und das Menü pausiert die Maschine',()
  const restart=app(a.values);restart.click('continue');assert.equal(restart.read('auto').state.workshop.orders[0].paused,true);
 });
 test('Pointer-Abbruch und Fensterfokusverlust beenden den Vorschub',()=>{
- const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('start');
+ const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('depth',.5);a.work('start');
  a.hold(1);a.tick(1000);a.release('pointercancel');assert.equal(a.read('auto').state.workshop.orders[0].piece.feeding,0);
  a.hold(1);a.release('blur');assert.equal(a.read('auto').state.workshop.orders[0].piece.feeding,0);assert.equal(a.read('auto').state.workshop.orders[0].paused,true);
 });
 test('Manuelles Fertigen über Ereignisse endet erst nach Ausspannen, Prüfung und Abgabe',()=>{
  const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');
  for(const target of [22,20.4,20.02]){
-  a.work('target',target);a.work('position',0);const o=a.read('auto').state.workshop.orders[0];a.work(o.status==='prepared'?'start':'pause');a.hold(1);
+  a.work('depth',(a.read('auto').state.workshop.orders[0].piece.reference-target)/2);a.work('position',0);const o=a.read('auto').state.workshop.orders[0];a.work(o.status==='prepared'?'start':'pause');a.hold(1);
   for(let n=0;n<15;n++)a.tick(1000);a.release();a.work('pause');
  }
- assert.equal(a.read('auto').state.workshop.orders[0].status,'machining');a.work('finish-cut');a.work('deburr');a.work('measure');a.work('deliver');assert.equal(a.read('auto').state.workshop.money,340);
- a.work('deliver');assert.equal(a.read('auto').state.workshop.money,340);
+ assert.equal(a.read('auto').state.workshop.orders[0].status,'machining');a.work('finish-cut');a.work('deburr');a.work('measure');a.work('deliver');assert.equal(a.read('auto').state.workshop.money,250+a.read('auto').state.workshop.orders[0].payout);
+ a.work('deliver');assert.equal(a.read('auto').state.workshop.money,250+a.read('auto').state.workshop.orders[0].payout);
 });
 test('Neuladen während gehaltenem Vorschub startet mit stehender Maschine',()=>{
- const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('start');a.hold(1);a.tick(1000);
+ const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('depth',.5);a.work('start');a.hold(1);a.tick(1000);
  assert.equal(a.read('auto').state.workshop.orders[0].piece.feeding,1);
  const b=app(new Map(a.values));b.click('continue');assert.equal(b.read('auto').state.workshop.orders[0].piece.feeding,0);assert.equal(b.read('auto').state.workshop.orders[0].paused,true);
+});
+test('Zweiter Finger kann während des Vorschubs zustellen, ohne die Ansicht neu aufzubauen',()=>{
+ const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');a.work('depth',.5);a.work('start');a.hold(1);
+ const html=a.element('workshop-app').innerHTML;a.work('depth-step',.1);a.release('pointerup',{pointerId:2});
+ assert.equal(a.read('auto').state.workshop.orders[0].piece.depth,.6);assert.equal(a.read('auto').state.workshop.orders[0].piece.feeding,1);assert.equal(a.element('workshop-app').innerHTML,html);
+ a.release('pointerup',{pointerId:1});assert.equal(a.read('auto').state.workshop.orders[0].piece.feeding,0);
 });

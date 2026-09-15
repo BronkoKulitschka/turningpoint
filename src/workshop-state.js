@@ -1,4 +1,4 @@
-import { blankPiece, validatePiece, qualityReport, cutTick } from './machining.js?v=005';
+import { blankPiece, validatePiece, qualityReport, cutTick, profileIndex, rewardFor } from './machining.js?v=006';
 // Spielregeln des Funktionstests. Zeit, Preise und Schnittwerte sind Spielbalancing.
 export const MATERIALS = {
   aluminium: {name:'Aluminium', price:12, color:'#b9c5bc'},
@@ -18,8 +18,8 @@ export const DEFAULT_LAYOUT = [
   {id:'clean',x:135,y:490},{id:'build',x:372,y:295},{id:'cat',x:777,y:631},
 ];
 export function freshWorkshop() {
-  return {version:2,money:250,stock:{aluminium:4,c45:3,brass:2},
-    orders:JOBS.map(j=>({id:j.id,status:'new',progress:0,paused:false,actual:null,measured:false,passes:0,piece:null})),
+  return {version:3,money:250,stock:{aluminium:4,c45:3,brass:2},
+    orders:JOBS.map(j=>({id:j.id,status:'new',progress:0,paused:false,actual:null,measured:false,passes:0,piece:null,payout:null})),
     active:null,tool:'hss',wear:20,cartReady:false,chips:0,scrap:0,
     coolant:100,settings:{rpm:450,feed:0.1,coolant:false},radio:false,volume:25,light:true,catPets:0,
     room:{width:6,depth:5,extension:false,drill:false,layout:DEFAULT_LAYOUT.map(o=>({...o}))}};
@@ -30,14 +30,14 @@ const bool=v=>typeof v==='boolean';
 export function validateWorkshop(w) {
   if(w===undefined) return freshWorkshop();
   const bad=()=>{throw new Error('Die Werkstattdaten sind beschädigt oder haben eine nicht unterstützte Version.');};
-  if(!w||![1,2].includes(w.version)||!integer(w.money,0,1e8)||!w.stock||!w.settings||!w.room||
+  if(!w||![1,2,3].includes(w.version)||!integer(w.money,0,1e8)||!w.stock||!w.settings||!w.room||
     !['aluminium','c45','brass'].every(k=>integer(w.stock[k],0,9999))||
     !['hss','carbide'].includes(w.tool)||!finite(w.wear,0,100)||!bool(w.cartReady)||
     !integer(w.chips,0,9999)||!integer(w.scrap,0,9999)||!bool(w.radio)||!bool(w.light)||!finite(w.volume,0,100)||
     !integer(w.catPets,0,1e7)||![300,450,800,1200].includes(w.settings.rpm)||![0.05,0.1,0.2,0.3].includes(w.settings.feed)||
     !Array.isArray(w.orders)||w.orders.length!==JOBS.length||!bool(w.room.extension)||!bool(w.room.drill)||
     w.room.width!==(w.room.extension?8:6)||w.room.depth!==5||!Array.isArray(w.room.layout)||w.room.layout.length!==DEFAULT_LAYOUT.length)bad();
-  if(w.version===2&&(!finite(w.coolant,0,100)||!bool(w.settings.coolant)))bad();
+  if(w.version>=2&&(!finite(w.coolant,0,100)||!bool(w.settings.coolant)))bad();
   const orders=JOBS.map(j=>{
     const o=w.orders.find(o=>o?.id===j.id);
     if(!o||!STEPS.includes(o.status)||!finite(o.progress,0,j.duration)||!bool(o.paused)||!bool(o.measured)||
@@ -50,11 +50,13 @@ export function validateWorkshop(w) {
       piece=blankPiece(j,j.material,o.actual??j.diameter+4);
       // Alte Timerdurchgänge hatten noch kein Profil. Sie beginnen pausiert am Rohling.
       if(o.status==='machining')piece.notice='Update: Dieser alte Durchgang hat noch kein Schnittprofil. Der Rohling ist jetzt manuell zu bearbeiten.';
-    }else if(w.version===2){
-      if(needsPiece){piece=validatePiece(o.piece,j);}else if(o.piece!==null)bad();
+    }else if(w.version>=2){
+      if(needsPiece){piece=validatePiece(o.piece,j,w.version<3);}else if(o.piece!==null)bad();
     }
-    const result={id:j.id,status:o.status,progress:o.progress,paused:w.version===1&&o.status==='machining'?true:o.paused,actual:o.actual,measured:o.measured,passes:o.passes,piece};
-    if(w.version===2&&['checked','completed'].includes(o.status)&&!qualityReport(result,j).ok)bad();
+    const payout=w.version<3?(o.status==='completed'?j.pay:null):o.payout;
+    if(o.status==='completed'?!integer(payout,j.pay,Math.round(j.pay*1.5)):payout!==null)bad();
+    const result={payout,id:j.id,status:o.status,progress:o.progress,paused:w.version===1&&o.status==='machining'?true:o.paused,actual:o.actual,measured:o.measured,passes:o.passes,piece};
+    if(w.version>=2&&['checked','completed'].includes(o.status)&&!qualityReport(result,j).ok)bad();
     return result;
   });
   const ongoing=orders.filter(o=>!['new','completed'].includes(o.status));
@@ -63,7 +65,7 @@ export function validateWorkshop(w) {
     const o=w.room.layout.find(o=>o?.id===def.id);
     if(!o||!finite(o.x,0,1200)||!finite(o.y,0,820))bad();return {id:def.id,x:o.x,y:o.y};
   });
-  return {version:2,money:w.money,stock:{aluminium:w.stock.aluminium,c45:w.stock.c45,brass:w.stock.brass},orders,
+  return {version:3,money:w.money,stock:{aluminium:w.stock.aluminium,c45:w.stock.c45,brass:w.stock.brass},orders,
     active:w.active,tool:w.tool,wear:w.wear,cartReady:w.cartReady,chips:w.chips,scrap:w.scrap,
     coolant:w.version===1?100:w.coolant,settings:{rpm:w.settings.rpm,feed:w.settings.feed,coolant:w.version===1?false:w.settings.coolant},radio:w.radio,volume:w.volume,light:w.light,catPets:w.catPets,
     room:{width:w.room.width,depth:5,extension:w.room.extension,drill:w.room.drill,layout}};
@@ -94,11 +96,30 @@ export function act(w,action,arg) {
       need([300,450,800,1200].includes(arg?.rpm)&&[0.05,0.1,0.2,0.3].includes(arg?.feed)&&typeof arg?.coolant==='boolean','Ungültige Einstellung.');
       w.settings={rpm:arg.rpm,feed:arg.feed,coolant:arg.coolant};return 'Schnittwerte eingestellt. Vorschub, Wärme und Oberfläche ändern sich entsprechend.';
     case 'refill-coolant': need(o?.status!=='machining'||o.paused,'Stoppe zuerst die Spindel.');need(w.coolant<100,'Der Kühlmitteltank ist voll.');pay(w,6);w.coolant=100;return 'Kühlmitteltank aufgefüllt.';
-    case 'target':
+    case 'touch': {
       need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst einen Rohling ein.');
-      need(o.status!=='machining'||o.paused,'Stoppe vor dem Zustellen die Spindel.');
-      need(finite(Number(arg),j.diameter-1,j.diameter+4.5),'Der Meißel steht außerhalb seines Einstellwegs.');
-      o.piece.target=Math.round(Number(arg)*100)/100;return 'Meißel eingestellt. Kleinerer Durchmesser bedeutet mehr Abtrag.';
+      need(o.status!=='machining'||o.paused,'Stoppe die Spindel zum Antasten.');
+      const p=o.piece;p.reference=p.diameters[profileIndex(p,j,p.z)];p.depth=0;p.target=p.reference;
+      p.notice='Schneide an dieser Stelle angetastet. Die radiale Zustellung steht auf null.';return p.notice;
+    }
+    case 'depth': {
+      need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst einen Rohling ein.');
+      const depth=Number(arg);need(finite(depth,0,3),'Schnitttiefe zwischen 0 und 3 mm wählen.');
+      const target=o.piece.reference-2*depth;need(target>=1,'Der Querschlitten erreicht seine mechanische Grenze.');
+      o.piece.depth=depth;o.piece.target=target;o.piece.notice='Radiale Schnitttiefe eingestellt. Der nächste Werkzeugweg schneidet mit dieser Zustellung.';
+      return o.piece.notice;
+    }
+    case 'probe-position':
+      need(o?.piece&&['prepared','machining'].includes(o.status),'Das Werkstück muss eingespannt sein.');
+      need(o.status!=='machining'||o.paused,'Stoppe die Spindel zum Anlegen des Messschiebers.');
+      need(finite(Number(arg),0,j.length),'Messstelle außerhalb des Werkstücks.');o.piece.probeZ=Number(arg);return 'Messstelle ausgewählt. Lege jetzt den Messschieber an.';
+    case 'measure-lathe': {
+      need(o?.piece&&['prepared','machining'].includes(o.status),'Das Werkstück muss eingespannt sein.');
+      need(o.status!=='machining'||o.paused,'Messen ist nur bei stehender Spindel möglich.');
+      const p=o.piece;p.reading={z:p.probeZ,diameter:Number(p.diameters[profileIndex(p,j,p.probeZ)].toFixed(2)),revision:p.revision};
+      p.notice='Messschieber angelegt. Der Messwert gilt nur für diese Stelle und diesen Bearbeitungsstand.';
+      return p.notice;
+    }
     case 'position':
       need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst einen Rohling ein.');
       need(o.status!=='machining'||o.paused,'Zum freien Positionieren muss die Spindel stehen.');
@@ -128,13 +149,17 @@ export function act(w,action,arg) {
       if(inTolerance(o)){o.status='checked';return 'Maßhaltig. Der Auftrag kann am Schreibtisch abgegeben werden.';}
       return qualityReport(o,j).reasons.join(' ');
     case 'rework':
-      need(o?.status==='deburred'&&o.measured&&!inTolerance(o),'Eine Nacharbeit ist erst nach einer fehlgeschlagenen Prüfung nötig.');
+      need(o&&['deburred','checked'].includes(o.status)&&o.measured,'Prüfe das Werkstück vor der Nacharbeit.');
       need(!qualityReport(o,j).undersize&&o.piece.material===j.material,'Untermaß oder falscher Werkstoff: Für diesen Auftrag ist ein neuer Rohling nötig.');
       need(w.wear<85,'Setze das Werkzeug vor der Nacharbeit instand.');need(w.chips<5,'Reinige zuerst den Arbeitsplatz.');
       o.status='prepared';o.passes=Math.min(100,o.passes+1);o.measured=false;w.cartReady=true;o.piece.z=0;o.piece.feeding=0;
       return 'Dasselbe Teil ist wieder eingespannt. Trage nur das verbliebene Aufmaß ab.';
-    case 'deliver':
-      need(o?.status==='checked','Der Auftrag muss zuerst gefertigt, entgratet und geprüft werden.');w.money+=j.pay;o.status='completed';w.active=null;w.cartReady=false;return `${j.pay} € erhalten. Auftrag abgeschlossen.`;
+    case 'deliver': {
+      need(o?.status==='checked','Der Auftrag muss zuerst gefertigt, entgratet und geprüft werden.');
+      const reward=rewardFor(o,j);need(reward.total>0,'Dieses Werkstück besteht die Abnahme nicht.');
+      o.payout=reward.total;w.money+=reward.total;o.status='completed';w.active=null;w.cartReady=false;
+      return `${reward.total} € erhalten: ${reward.base} € Grundlohn + ${reward.bonus} € Genauigkeitsbonus.`;
+    }
     case 'clean': need(w.chips>0,'Der Boden ist bereits sauber.');w.scrap+=w.chips;w.chips=0;return 'Späne eingesammelt. Du kannst sie am Eimer verkaufen.';
     case 'sell-scrap': need(w.scrap>0,'Es sind noch keine Späne eingesammelt.');const cash=w.scrap*3;w.money+=cash;w.scrap=0;return `${cash} € für Späne erhalten.`;
     case 'radio': w.radio=!w.radio;return w.radio?'Werkstattradio eingeschaltet.':'Werkstattradio ausgeschaltet.';
