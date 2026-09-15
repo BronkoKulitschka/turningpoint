@@ -1,34 +1,37 @@
+import { freshWorkshop, validateWorkshop } from './workshop-state.js?v=004';
 export const SLOT_IDS = ['auto', '1', '2', '3'];
 export const PREFIX = 'turningpoint.save.v1.';
 const text = (s, max, empty = false) => typeof s === 'string' && s.length <= max && (empty || s.trim().length > 0);
 const date = s => typeof s === 'string' && /^\d{4}-\d\d-\d\dT/.test(s) && Number.isFinite(Date.parse(s));
 
 export function validateSave(value) {
-  if (!value || value.game !== 'turningpoint' || value.version !== 1) {
-    throw new Error('Diese Datei ist kein unterstützter Turning-Point-Spielstand (Version 1).');
+  if (!value || value.game !== 'turningpoint' || ![1, 2].includes(value.version)) {
+    throw new Error('Diese Datei ist kein unterstützter Turning-Point-Spielstand.');
   }
   const s = value.state;
   if (!s || !text(s.id, 100) || !text(s.workshopName, 40) || !text(s.ownerName, 40) ||
       (s.note !== undefined && !text(s.note, 2000, true)) || s.chapter !== 1 || !date(s.createdAt) || !date(s.updatedAt) || !date(value.savedAt)) {
     throw new Error('Der Spielstand ist unvollständig oder beschädigt.');
   }
+  if (value.version === 2 && s.workshop === undefined) throw new Error('Werkstattdaten fehlen in dieser Sicherung.');
+  const workshop = validateWorkshop(s.workshop);
   // Nur bekannte Felder übernehmen, keine fremden Objekte oder HTML ausführen.
-  return { game: 'turningpoint', version: 1, savedAt: value.savedAt, state: {
+  return { game: 'turningpoint', version: 2, savedAt: value.savedAt, state: {
     id: s.id, workshopName: s.workshopName.trim(), ownerName: s.ownerName.trim(),
     // Alte Sicherungen aus Update 002 bleiben verlustfrei lesbar.
     ...(s.note !== undefined ? { note: s.note } : {}),
-    chapter: 1, createdAt: s.createdAt, updatedAt: s.updatedAt,
+    chapter: 1, createdAt: s.createdAt, updatedAt: s.updatedAt, workshop,
   } };
 }
 
 export function makeSave(state) {
-  return validateSave({ game: 'turningpoint', version: 1, savedAt: new Date().toISOString(), state });
+  return validateSave({ game: 'turningpoint', version: 2, savedAt: new Date().toISOString(), state });
 }
 
 export function newState(workshopName, ownerName) {
   const now = new Date().toISOString();
   return { id: crypto.randomUUID(), workshopName: workshopName.trim(), ownerName: ownerName.trim(),
-    chapter: 1, createdAt: now, updatedAt: now };
+    chapter: 1, createdAt: now, updatedAt: now, workshop: freshWorkshop() };
 }
 
 export function createStore(storage) {

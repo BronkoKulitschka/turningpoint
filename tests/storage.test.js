@@ -15,7 +15,7 @@ test('Export/Import erhält Namen, Umlaute, Notiz und Identität',()=>{
  const restored=validateSave(JSON.parse(JSON.stringify(save)));assert.deepEqual(restored,save);
 });
 test('Unbekannte Versionen, fehlende Felder und übergroße Werte werden abgelehnt',()=>{
- for(const mutate of [s=>s.version=2,s=>s.game='other',s=>delete s.state.ownerName,s=>s.state.note='a'.repeat(2001),s=>s.savedAt='invalid',s=>s.state.workshopName='   ',s=>s.state.chapter=99]){
+ for(const mutate of [s=>s.version=99,s=>s.game='other',s=>delete s.state.ownerName,s=>s.state.note='a'.repeat(2001),s=>s.savedAt='invalid',s=>s.state.workshopName='   ',s=>s.state.chapter=99]){
   const save=sample();mutate(save);assert.throws(()=>validateSave(save));
  }
 });

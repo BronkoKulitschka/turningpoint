@@ -1,4 +1,6 @@
-import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=003';
+import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=004';
+import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=004';
+import { workshopHTML } from './workshop-ui.js?v=004';
 
 const $ = s => document.querySelector(s);
 const panel = $('#panel');
@@ -9,6 +11,49 @@ try { local = window.localStorage; } catch { local = {getItem(){throw Error();},
 const store = createStore(local);
 let current = null, dirty = false, view = 'home', pending = null, cancelled = null, imported = null;
 let autoTimer, toastTimer, autoSuspended = false;
+let station = null, orderTab = 'new', zoom = 1, lastTick = 0, persistElapsed = 0;
+let audioContext = null, audioGain = null, audioOscillators = [], audioAllowed = false;
+const shop = $('#workshop-app');
+function silenceRadio() { if(audioGain && audioContext) audioGain.gain.setTargetAtTime(0,audioContext.currentTime,0.03); }
+function syncRadio() {
+  const w=current?.workshop;
+  if(!w?.radio || !audioAllowed || view!=='workshop' || document.hidden){silenceRadio();return;}
+  try {
+    if(!audioContext){
+      const Audio=window.AudioContext||window.webkitAudioContext;
+      if(!Audio)throw new Error('Dieser Browser unterstützt die Radiowiedergabe nicht.');
+      audioContext=new Audio();audioGain=audioContext.createGain();audioGain.gain.value=0;audioGain.connect(audioContext.destination);
+      [130.81,164.81,196,261.63].forEach((f,i)=>{const oscillator=audioContext.createOscillator();oscillator.type='sine';oscillator.frequency.value=f;const gain=audioContext.createGain();gain.gain.value=0.13/(i+1);oscillator.connect(gain);gain.connect(audioGain);oscillator.start();audioOscillators.push(oscillator);});
+    }
+    audioContext.resume().catch(()=>{toast('Tippe erneut auf das Radio, um die Wiedergabe zu erlauben.',true);});
+    audioGain.gain.setTargetAtTime(w.volume/100*.18,audioContext.currentTime,0.15);
+    if($('#audio-state'))$('#audio-state').textContent='Werkstattklang läuft.';
+  }catch(e){toast(e.message,true);}
+}
+function leaveWorkshop(){
+  if(current && view==='workshop'){
+    const order=activeOrder(current.workshop);
+    if(order?.status==='machining'&&!order.paused){order.paused=true;dirty=true;flushAuto();}
+  }
+  shop.hidden=true;$('.workbench').hidden=false;silenceRadio();
+}
+function renderShop(){
+  if(!current)return;
+  const scroll=$('.scene-scroll');const x=scroll?.scrollLeft||0, y=scroll?.scrollTop||0;
+  shop.innerHTML=workshopHTML(current.workshop,current.workshopName,station,orderTab,zoom);
+  const nextScroll=$('.scene-scroll');if(nextScroll){nextScroll.scrollLeft=x;nextScroll.scrollTop=y;}
+  const saved=$('#shop-save-state');if(saved)saved.textContent=autoSuspended?'Autosave wegen eines anderen Tabs angehalten. Bitte manuell sichern.':dirty?'Noch nicht gespeichert – bitte über das Menü sichern.':'✓ Fortschritt automatisch auf diesem Gerät gesichert.';
+}
+function commitWork(action,arg){
+  if(!current)return;
+  if(autoSuspended)throw new Error('Ein anderer Tab hat gespeichert. Sichere deinen Stand manuell und lade ihn anschließend über das Menü.');
+  const copy=validateWorkshop(current.workshop);const result=act(copy,action,arg);current.workshop=copy;
+  current.updatedAt=new Date().toISOString();dirty=true;flushAuto();
+  if(action==='accept')orderTab='active';if(action==='deliver')orderTab='done';
+  if(action==='radio')audioAllowed=true;
+  renderShop();syncRadio();toast(result);
+}
+
 
 function toast(message, error = false) {
   clearTimeout(toastTimer); const el = $('#toast'); el.textContent = message;
@@ -16,6 +61,7 @@ function toast(message, error = false) {
   toastTimer = setTimeout(() => { el.hidden = true; }, error ? 10000 : 4200);
 }
 function show(html, number, nextView) {
+  leaveWorkshop();
   view = nextView; panel.innerHTML = html; $('#page-number').textContent = number;
   panel.focus({preventScroll:true});
 }
@@ -42,25 +88,28 @@ function newGame(values = {}) {
   if (!values.slot) { const free = ['1','2','3'].find(id => store.read(id).status==='empty'); if (free) $('#first-slot').value=free; }
 }
 function setCurrent(save) {
-  clearTimeout(autoTimer); current = structuredClone(save.state); dirty = false; autoSuspended = false;
+  clearTimeout(autoTimer); current = structuredClone(save.state); current.workshop=validateWorkshop(current.workshop); const order=activeOrder(current.workshop); if(order?.status==='machining')order.paused=true; dirty = false; autoSuspended = false; station=null; zoom=1;
   try { store.write('auto', makeSave(current)); $('#storage-status').textContent = 'Automatisch auf diesem Gerät gespeichert.'; }
   catch(e) { dirty = true; toast(e.message, true); $('#storage-status').textContent = 'Nicht gespeichert – bitte Sicherung exportieren.'; }
   workshopSummary();
 }
 function workshopSummary() {
-  if (!current) return home();
-  show(`${back()}<div class="chapter-heading"><h2>Betriebsakte</h2><span class="tag">KAPITEL 01</span></div><div class="workshop-card"><img src="./assets/workshop.svg" alt="Opas Werkstatt mit der alten grünen Drehbank"><dl><div><dt>Werkstatt</dt><dd>${escape(current.workshopName)}</dd></div><div><dt>Inhaber</dt><dd>${escape(current.ownerName)}</dd></div><div><dt>Begonnen</dt><dd>${new Intl.DateTimeFormat('de-DE', {dateStyle:'medium'}).format(new Date(current.createdAt))}</dd></div></dl></div><p class="autosave" id="auto-label">${dirty ? 'Noch nicht automatisch gespeichert.' : '✓ Spielstand automatisch gesichert.'}</p><div class="form-actions"><button class="small-btn primary" data-action="save">Spiel speichern</button><button class="small-btn" data-action="export">Datei exportieren</button></div><p class="hint">Die spielbare Werkstatt folgt in einem weiteren Update.</p>`, '03 / BETRIEBSAKTE', 'workshop');
+  if(!current)return home();
+  current.workshop=validateWorkshop(current.workshop);
+  view='workshop';$('.workbench').hidden=true;shop.hidden=false;lastTick=performance.now();
+  orderTab=activeOrder(current.workshop)?'active':'new';renderShop();syncRadio();
 }
 function flushAuto() {
   clearTimeout(autoTimer);
   if (!current || !dirty || autoSuspended) return;
   try {
     store.write('auto', makeSave(current)); dirty = false;
+    if($('#shop-save-state'))$('#shop-save-state').textContent='✓ Fortschritt automatisch auf diesem Gerät gesichert.';
     if ($('#auto-label')) $('#auto-label').textContent='✓ Automatisch gespeichert · '+when(new Date().toISOString());
     $('#storage-status').textContent='Automatisch auf diesem Gerät gespeichert.';
   } catch(e) {
     if ($('#auto-label')) $('#auto-label').textContent='Speichern fehlgeschlagen. Bitte Sicherung exportieren.';
-    $('#storage-status').textContent='Nicht gespeichert – bitte Sicherung exportieren.'; toast(e.message,true);
+    $('#storage-status').textContent='Nicht gespeichert – bitte Sicherung exportieren.'; if($('#shop-save-state'))$('#shop-save-state').textContent='Speichern fehlgeschlagen. Über das Menü eine Datei exportieren.'; toast(e.message,true);
   }
 }
 function slots(mode = 'load') {
@@ -135,12 +184,46 @@ $('#import-file').addEventListener('change', async e => {
 });
 window.addEventListener('storage', e => {
   if(!e.key?.startsWith('turningpoint.save.v1.')) return;
-  if(current && e.key.endsWith('.auto')) { autoSuspended=true; clearTimeout(autoTimer); toast('Ein anderer Tab hat gespeichert. Sichere deine Änderungen bitte manuell.',true); }
+  if(current && e.key.endsWith('.auto')) { autoSuspended=true; clearTimeout(autoTimer); const order=activeOrder(current.workshop);if(order?.status==='machining')order.paused=true; if(view==='workshop')renderShop();toast('Ein anderer Tab hat gespeichert. Sichere deine Änderungen bitte manuell.',true); }
   if(view==='home') home();
 });
-document.addEventListener('visibilitychange',()=>{if(document.hidden) flushAuto();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){const order=current&&activeOrder(current.workshop);if(order?.status==='machining'){order.paused=true;dirty=true;}flushAuto();silenceRadio();}else if(view==='workshop'){lastTick=performance.now();renderShop();syncRadio();}});
 window.addEventListener('pagehide',flushAuto);
 window.addEventListener('beforeunload',e=>{flushAuto();if(dirty){e.preventDefault();e.returnValue='';}});
+shop.addEventListener('click',event=>{
+  const el=event.target.closest('[data-station],[data-work],[data-open-menu],[data-close-station],[data-order-tab],[data-zoom]');
+  if(!el || el.disabled)return;
+  try{
+    if(el.dataset.openMenu!==undefined){flushAuto();home();return;}
+    if(el.dataset.closeStation!==undefined){station=null;renderShop();return;}
+    if(el.dataset.station){station=el.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';if(station==='radio')audioAllowed=true;renderShop();syncRadio();return;}
+    if(el.dataset.orderTab){orderTab=el.dataset.orderTab;renderShop();return;}
+    if(el.dataset.zoom){zoom=el.dataset.zoom==='reset'?1:Math.max(1,Math.min(2,zoom+(el.dataset.zoom==='in' ? 0.25 : -0.25)));renderShop();return;}
+    if(el.dataset.work)commitWork(el.dataset.work,el.dataset.arg);
+  }catch(e){toast(e.message,true);}
+});
+shop.addEventListener('keydown',event=>{
+  if((event.key==='Enter'||event.key===' ') && event.target.matches('g[data-station]')){
+    event.preventDefault();station=event.target.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';renderShop();
+  }
+});
+shop.addEventListener('submit',event=>{
+  if(event.target.id!=='machine-settings')return;event.preventDefault();
+  const values=new FormData(event.target);
+  try{commitWork('settings',{rpm:Number(values.get('rpm')),feed:Number(values.get('feed'))});}catch(e){toast(e.message,true);}
+});
+shop.addEventListener('change',event=>{
+  if(event.target.id==='radio-volume')try{audioAllowed=true;commitWork('volume',Number(event.target.value));}catch(e){toast(e.message,true);}
+});
+setInterval(()=>{
+  if(view!=='workshop'||!current||document.hidden||autoSuspended){lastTick=performance.now();return;}
+  const now=performance.now(),elapsed=Math.min(1000,Math.max(0,now-lastTick));lastTick=now;
+  const order=activeOrder(current.workshop);if(order?.status!=='machining'||order.paused)return;
+  const done=advance(current.workshop,elapsed);dirty=true;current.updatedAt=new Date().toISOString();persistElapsed+=elapsed;
+  if(done||persistElapsed>=1000){persistElapsed=0;flushAuto();}
+  if(done){renderShop();toast('Bearbeitung fertig. Entgrate das Teil am Schraubstock.');}
+  else{const progress=$('#machine-progress');if(progress)progress.value=order.progress;const label=$('#machine-progress-label');if(label)label.textContent=Math.floor(order.progress/jobFor(order).duration*100)+' % · in Bearbeitung';}
+},200);
 setInterval(flushAuto,120000);
 if(store.read('auto').status==='unavailable') $('#storage-status').textContent='Browserspeicher gesperrt. Bitte in einem normalen Browser öffnen.';
 home();
