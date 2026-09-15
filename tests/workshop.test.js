@@ -1,49 +1,104 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { freshWorkshop, validateWorkshop, act, advance, activeOrder, nextTask, JOBS } from '../src/workshop-state.js';
+import { qualityReport } from '../src/machining.js';
 import { makeSave, newState, validateSave, createStore } from '../src/storage.js';
 const step=(w,a,arg)=>{const result=act(w,a,arg);validateWorkshop(w);return result;};
-const machine=(w)=>{for(let n=0;n<30&&activeOrder(w)?.status==='machining';n++)advance(w,1000);validateWorkshop(w);};
-function finish(w,id,material){step(w,'accept',id);step(w,'select-material',material);step(w,'prepare');step(w,'start');machine(w);step(w,'deburr');step(w,'measure');step(w,'deliver');}
-test('Drei durchgängige Aufträge: Ressourcen, Zahlung und Abschluss sind konsistent',()=>{
+function ready(id='bolt',material){const w=freshWorkshop(),j=JOBS.find(j=>j.id===id);step(w,'accept',id);step(w,'select-material',material??j.material);step(w,'prepare');return w;}
+function pass(w,target,{feed=.1,rpm=450,coolant=true,direction=1}={}){
+ const o=activeOrder(w),j=JOBS.find(j=>j.id===o.id);
+ if(o.status==='machining'&&!o.paused)step(w,'pause');
+ step(w,'settings',{rpm,feed,coolant});step(w,'target',target);step(w,'position',direction===1?0:j.length);
+ step(w,o.status==='prepared'?'start':'pause');step(w,'feed',direction);
+ for(let n=0;n<2000&&o.piece.feeding;n++)advance(w,100);
+ validateWorkshop(w);return o;
+}
+function cutGood(w,j){for(const d of [j.diameter+2,j.diameter+.4,j.diameter+.02])pass(w,d);assert.equal(qualityReport(activeOrder(w),j).ok,true);}
+function inspect(w){if(!activeOrder(w).paused)step(w,'pause');step(w,'finish-cut');step(w,'deburr');step(w,'measure');}
+function finish(w,id,material){step(w,'accept',id);step(w,'select-material',material);step(w,'prepare');cutGood(w,JOBS.find(j=>j.id===id));inspect(w);step(w,'deliver');}
+test('Alle Aufträge lassen sich manuell fertigen; Material, Qualität und Bezahlung bleiben konsistent',()=>{
  const w=freshWorkshop();for(const j of JOBS)finish(w,j.id,j.material);
  assert.equal(w.money,630);assert.deepEqual(w.stock,{aluminium:3,c45:2,brass:1});assert.equal(w.chips,3);
  assert.ok(w.orders.every(o=>o.status==='completed'));assert.equal(w.active,null);assert.equal(nextTask(w).station,'build');
  assert.throws(()=>act(w,'deliver'));assert.equal(w.money,630);
 });
-test('Falsches Material, doppelte Annahme und verfrühte Abgabe verändern den Stand nicht',()=>{
- const w=freshWorkshop();step(w,'accept','bolt');const before=structuredClone(w);
- for(const [a,arg] of [['select-material','c45'],['accept','pin'],['deliver'],['start'],['measure']]){assert.throws(()=>act(w,a,arg));assert.deepEqual(w,before);}
+test('Spindel allein und losgelassener Vorschub entfernen kein Material',()=>{
+ const w=ready();step(w,'start');const before=structuredClone(activeOrder(w).piece.diameters);
+ for(let n=0;n<100;n++)advance(w,1000);assert.deepEqual(activeOrder(w).piece.diameters,before);assert.equal(activeOrder(w).status,'machining');
+ step(w,'feed',1);advance(w,500);step(w,'feed',0);const profile=[...activeOrder(w).piece.diameters];
+ assert.ok(profile.some((d,i)=>d<before[i]));assert.ok(profile.some((d,i)=>d===before[i]));
+ advance(w,1000);assert.deepEqual(activeOrder(w).piece.diameters,profile);
 });
-test('Schlechte Schnittwerte erfordern Messen und Nacharbeit, ohne erneuten Materialverbrauch',()=>{
- const w=freshWorkshop();step(w,'accept','bolt');step(w,'select-material','aluminium');step(w,'prepare');step(w,'settings',{rpm:800,feed:0.3});step(w,'start');machine(w);
- step(w,'deburr');step(w,'measure');assert.equal(activeOrder(w).status,'deburred');assert.equal(activeOrder(w).actual,20.24);assert.throws(()=>act(w,'deliver'));
- step(w,'rework');step(w,'settings',{rpm:450,feed:0.1});step(w,'start');machine(w);step(w,'deburr');step(w,'measure');step(w,'deliver');
- assert.equal(w.stock.aluminium,3);assert.equal(w.money,340);assert.equal(w.chips,2);
+test('Nur überfahrene Abschnitte werden geschnitten; beide Vorschubrichtungen funktionieren',()=>{
+ const w=ready();step(w,'position',30);step(w,'start');step(w,'feed',1);advance(w,1000);step(w,'feed',0);
+ const p=activeOrder(w).piece;assert.equal(p.diameters[0],24);assert.ok(p.diameters[13]<24);assert.equal(p.diameters.at(-1),24);
+ step(w,'pause');step(w,'position',60);step(w,'pause');step(w,'feed',-1);advance(w,1000);assert.ok(p.diameters.at(-1)<24);
 });
-test('Speichern und Laden in der Bearbeitung erhält den exakten Fortschritt und verhindert doppelte Auszahlungen',()=>{
- const state=newState('Werkstatt','Robin'),w=state.workshop;step(w,'accept','bolt');step(w,'select-material','aluminium');step(w,'prepare');step(w,'start');advance(w,1700);step(w,'pause');
- const save=validateSave(JSON.parse(JSON.stringify(makeSave(state))));assert.equal(save.state.workshop.orders[0].progress,1700);
- advance(save.state.workshop,2000);assert.equal(save.state.workshop.orders[0].progress,1700);step(save.state.workshop,'pause');machine(save.state.workshop);
- step(save.state.workshop,'deburr');step(save.state.workshop,'measure');step(save.state.workshop,'deliver');
- const restored=validateSave(JSON.parse(JSON.stringify(makeSave(save.state)))).state.workshop;assert.equal(restored.money,340);assert.throws(()=>act(restored,'deliver'));
+test('Untermaß bleibt irreversibel und kostet beim Neustart einen weiteren Rohling',()=>{
+ const w=ready();pass(w,22);pass(w,20.4);pass(w,19.8);inspect(w);
+ assert.equal(qualityReport(activeOrder(w),JOBS[0]).undersize,true);assert.throws(()=>act(w,'deliver'));assert.throws(()=>act(w,'rework'));
+ const old=[...activeOrder(w).piece.diameters];assert.ok(old.every(d=>d<19.9));step(w,'scrap-piece');assert.equal(w.stock.aluminium,3);step(w,'select-material','aluminium');assert.equal(w.stock.aluminium,2);assert.equal(w.scrap,1);
 });
-test('Alte Speicherstände werden erweitert; beschädigte neue Werkstattdaten werden abgelehnt',()=>{
- const old={game:'turningpoint',version:1,savedAt:new Date().toISOString(),state:newState('Alt','Robin')};delete old.state.workshop;
- const migrated=validateSave(old);assert.equal(migrated.version,2);assert.equal(migrated.state.workshop.money,250);
- for(const mutate of [s=>s.state.workshop.money=-1,s=>s.state.workshop.stock.aluminium='9',s=>s.state.workshop.orders[0].status='completed',s=>s.state.workshop.room.width=50,s=>s.state.workshop.active='x',s=>delete s.state.workshop]){
-  const save=makeSave(newState('Test','Robin'));mutate(save);assert.throws(()=>validateSave(save));
- }
+test('Übermaß kann auf demselben Rohling nachgearbeitet werden',()=>{
+ const w=ready();pass(w,22);pass(w,20.4);inspect(w);assert.equal(activeOrder(w).status,'deburred');step(w,'rework');
+ assert.ok(activeOrder(w).piece.diameters.every(d=>d<20.5));pass(w,20.02);inspect(w);step(w,'deliver');assert.equal(w.money,340);assert.equal(w.stock.aluminium,3);
 });
-test('Ausbau, zusätzliche Maschine, Einkauf und Späneverkauf verbuchen genau einmal',()=>{
+test('Falscher Werkstoff ist wählbar, wird verbraucht und von der Abnahme zurückgewiesen',()=>{
+ const w=ready('bolt','brass');pass(w,22);pass(w,20.4);pass(w,20.02);inspect(w);
+ assert.equal(w.stock.brass,1);assert.match(qualityReport(activeOrder(w),JOBS[0]).reasons.join(' '),/Werkstoff/);assert.throws(()=>act(w,'deliver'));
+});
+test('Hoher Vorschub spart Zeit, erzeugt aber schlechtere Oberfläche',()=>{
+ const a=ready(),b=ready();pass(a,23,{feed:.1});pass(b,23,{feed:.3});
+ const pa=activeOrder(a).piece,pb=activeOrder(b).piece;
+ assert.ok(pb.seconds<pa.seconds);assert.ok(Math.max(...pb.surface)>Math.max(...pa.surface)+2);
+});
+test('Zu tiefer Schnitt löst Überlast aus und verschleißt das Werkzeug',()=>{
+ const w=ready('pin');step(w,'settings',{rpm:450,feed:.3,coolant:false});step(w,'target',16);step(w,'start');step(w,'feed',1);advance(w,500);
+ assert.equal(activeOrder(w).paused,true);assert.equal(activeOrder(w).piece.feeding,0);assert.match(activeOrder(w).piece.notice,/Überlast/);assert.ok(w.wear>20);
+});
+test('Drehzahl, Werkstoff, Kühlung und Werkzeug haben messbare Folgen',()=>{
+ const dry=ready('pin'),wet=ready('pin');pass(dry,19,{rpm:800,coolant:false});pass(wet,19,{rpm:800,coolant:true});
+ assert.ok(activeOrder(dry).piece.heat>activeOrder(wet).piece.heat);assert.equal(dry.coolant,100);assert.ok(wet.coolant<100);
+ const low=ready(),high=ready();pass(low,23,{rpm:300});pass(high,23,{rpm:1200});assert.ok(activeOrder(high).piece.seconds<activeOrder(low).piece.seconds);
+ const hss=ready(),carbide=ready();step(carbide,'tool','carbide');step(carbide,'prepare');pass(hss,23,{rpm:1200});pass(carbide,23,{rpm:1200});assert.ok(carbide.wear<hss.wear);assert.equal(carbide.money,238);
+ const soft=ready(),hard=ready('bolt','c45');pass(soft,23,{coolant:false});pass(hard,23,{coolant:false});assert.ok(hard.wear>soft.wear);
+});
+test('Einstellungen und Positionieren sind bei laufender Spindel gesperrt; leere Kühlung hat keine Wirkung',()=>{
+ const w=ready();step(w,'start');const before=structuredClone(w);
+ for(const [a,arg] of [['position',30],['target',20],['settings',{rpm:800,feed:.2,coolant:true}],['finish-cut'],['scrap-piece'],['deliver']]){assert.throws(()=>act(w,a,arg));assert.deepEqual(w,before);}
+ const a=ready('pin'),b=ready('pin');a.coolant=0;b.coolant=0;pass(a,19,{coolant:true});pass(b,19,{coolant:false});assert.equal(activeOrder(a).piece.heat,activeOrder(b).piece.heat);
+});
+test('Profile, Wärme und Einstellungen überleben Speichern; Pausieren verhindert weiteren Abtrag',()=>{
+ const state=newState('Werkstatt','Robin');state.workshop=ready();const w=state.workshop;step(w,'start');step(w,'feed',1);advance(w,700);step(w,'pause');
+ const save=validateSave(JSON.parse(JSON.stringify(makeSave(state))));const restored=save.state.workshop;
+ assert.deepEqual(activeOrder(restored).piece,activeOrder(w).piece);const profile=[...activeOrder(restored).piece.diameters];advance(restored,1000);assert.deepEqual(activeOrder(restored).piece.diameters,profile);
+});
+test('Update-004-Spielstände migrieren laufende und abgeschlossene Werkstücke ohne Verlust der Kasse',()=>{
+ const w=ready();w.version=1;delete w.coolant;delete w.settings.coolant;for(const o of w.orders)delete o.piece;
+ w.orders[0].status='machining';w.orders[0].progress=1700;
+ const migrated=validateWorkshop(w);assert.equal(migrated.version,2);assert.equal(migrated.orders[0].paused,true);assert.ok(migrated.orders[0].piece.diameters.every(d=>d===24));assert.equal(migrated.stock.aluminium,3);
+ w.orders[0]={...w.orders[0],status:'completed',actual:20.04,measured:true,progress:12000};w.active=null;w.money=340;
+ const done=validateWorkshop(w);assert.equal(done.money,340);assert.equal(done.orders[0].status,'completed');validateWorkshop(done);
+});
+test('Beschädigte Profile und falsche abgeschlossene Qualität werden abgelehnt',()=>{
+ const w=ready();for(const mutate of [x=>x.orders[0].piece.diameters.pop(),x=>x.orders[0].piece.heat=NaN,x=>x.orders[0].piece.material='holz',x=>x.settings.coolant='ja',x=>x.coolant=-1]){const copy=structuredClone(w);mutate(copy);assert.throws(()=>validateWorkshop(copy));}
+ cutGood(w,JOBS[0]);inspect(w);step(w,'deliver');w.orders[0].piece.diameters[0]=19.5;assert.throws(()=>validateWorkshop(w));
+});
+test('Ausbau und zusätzliche Maschine funktionieren weiterhin',()=>{
  const w=freshWorkshop();for(const j of JOBS)finish(w,j.id,j.material);
- step(w,'clean');step(w,'sell-scrap');assert.equal(w.money,639);assert.throws(()=>act(w,'sell-scrap'));
- step(w,'extend');step(w,'buy-drill');assert.equal(w.money,259);assert.equal(w.room.width,8);assert.equal(w.room.drill,true);
- assert.throws(()=>act(w,'extend'));assert.throws(()=>act(w,'buy-drill'));step(w,'drill-test');assert.equal(w.stock.aluminium,2);assert.equal(w.scrap,1);
- step(w,'buy-material','aluminium');assert.equal(w.stock.aluminium,5);assert.equal(w.money,223);
+ step(w,'clean');step(w,'sell-scrap');step(w,'extend');step(w,'buy-drill');assert.equal(w.money,259);assert.equal(w.room.width,8);
+ assert.throws(()=>act(w,'extend'));assert.throws(()=>act(w,'buy-drill'));step(w,'drill-test');assert.equal(w.stock.aluminium,2);
 });
-test('Spielzustand ist von Speicherplatzkopien unabhängig; Radio und Layout werden mitgesichert',()=>{
- const state=newState('Test','Robin');step(state.workshop,'radio');step(state.workshop,'volume',48);step(state.workshop,'light');step(state.workshop,'pet');
- const data=new Map(),store=createStore({getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)});store.write('1',makeSave(state));
- state.workshop.money=0;const saved=store.read('1').save.state.workshop;assert.equal(saved.money,250);assert.equal(saved.radio,true);assert.equal(saved.volume,48);assert.equal(saved.light,false);assert.equal(saved.catPets,1);assert.equal(saved.room.layout.length,12);
+test('Radio und Speicherplatzkopien bleiben unabhängig',()=>{
+ const state=newState('Test','Robin');step(state.workshop,'radio');step(state.workshop,'volume',48);step(state.workshop,'pet');
+ const data=new Map(),store=createStore({getItem:k=>data.get(k)??null,setItem:(k,v)=>data.set(k,v)});store.write('1',makeSave(state));state.workshop.money=0;
+ const saved=store.read('1').save.state.workshop;assert.equal(saved.money,250);assert.equal(saved.radio,true);assert.equal(saved.volume,48);assert.equal(saved.catPets,1);
+});
+test('Späne lassen sich ohne tatsächlichen Abtrag nicht erzeugen',()=>{
+ const w=ready();step(w,'start');step(w,'pause');step(w,'finish-cut');assert.equal(w.chips,0);
+ step(w,'deburr');step(w,'measure');step(w,'rework');step(w,'start');step(w,'pause');step(w,'finish-cut');assert.equal(w.chips,0);
+});
+test('Maßhaltiges, aber grob gedrehtes Teil erhält keine Freigabe',()=>{
+ const w=ready();pass(w,22);pass(w,20.4);pass(w,20.02,{feed:.3});inspect(w);
+ const q=qualityReport(activeOrder(w),JOBS[0]);assert.ok(q.min>=19.9&&q.max<=20.1);assert.ok(q.roughness>3.2);assert.equal(q.ok,false);assert.throws(()=>act(w,'deliver'));
 });

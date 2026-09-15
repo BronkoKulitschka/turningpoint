@@ -1,6 +1,7 @@
-import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=004';
-import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=004';
-import { workshopHTML } from './workshop-ui.js?v=004';
+import { machineReadout } from './lathe-ui.js?v=005';
+import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=005';
+import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=005';
+import { workshopHTML } from './workshop-ui.js?v=005';
 
 const $ = s => document.querySelector(s);
 const panel = $('#panel');
@@ -33,7 +34,7 @@ function syncRadio() {
 function leaveWorkshop(){
   if(current && view==='workshop'){
     const order=activeOrder(current.workshop);
-    if(order?.status==='machining'&&!order.paused){order.paused=true;dirty=true;flushAuto();}
+    if(order?.status==='machining'&&!order.paused){order.paused=true;if(order.piece)order.piece.feeding=0;dirty=true;flushAuto();}
   }
   shop.hidden=true;$('.workbench').hidden=false;silenceRadio();
 }
@@ -44,14 +45,30 @@ function renderShop(){
   const nextScroll=$('.scene-scroll');if(nextScroll){nextScroll.scrollLeft=x;nextScroll.scrollTop=y;}
   const saved=$('#shop-save-state');if(saved)saved.textContent=autoSuspended?'Autosave wegen eines anderen Tabs angehalten. Bitte manuell sichern.':dirty?'Noch nicht gespeichert – bitte über das Menü sichern.':'✓ Fortschritt automatisch auf diesem Gerät gesichert.';
 }
-function commitWork(action,arg){
+function refreshMachine(){
+  const o=current&&activeOrder(current.workshop),live=$('#machine-live');
+  if(station==='lathe'&&o?.piece&&live){
+    const expanded=live.querySelector?.('details')?.open;
+    live.innerHTML=machineReadout(current.workshop,o,jobFor(o));
+    const details=live.querySelector?.('details');if(details)details.open=!!expanded;
+  }
+}
+function releaseFeed(){
+  const o=current&&activeOrder(current.workshop);
+  if(o?.piece?.feeding){o.piece.feeding=0;dirty=true;flushAuto();refreshMachine();}
+}
+function haltMachining(){
+  const o=current&&activeOrder(current.workshop);
+  if(o?.status==='machining'){o.paused=true;o.piece.feeding=0;dirty=true;flushAuto();}
+}
+function commitWork(action,arg,quiet=false){
   if(!current)return;
   if(autoSuspended)throw new Error('Ein anderer Tab hat gespeichert. Sichere deinen Stand manuell und lade ihn anschließend über das Menü.');
   const copy=validateWorkshop(current.workshop);const result=act(copy,action,arg);current.workshop=copy;
   current.updatedAt=new Date().toISOString();dirty=true;flushAuto();
   if(action==='accept')orderTab='active';if(action==='deliver')orderTab='done';
   if(action==='radio')audioAllowed=true;
-  renderShop();syncRadio();toast(result);
+  if(quiet){refreshMachine();}else{renderShop();syncRadio();toast(result);}
 }
 
 
@@ -88,7 +105,7 @@ function newGame(values = {}) {
   if (!values.slot) { const free = ['1','2','3'].find(id => store.read(id).status==='empty'); if (free) $('#first-slot').value=free; }
 }
 function setCurrent(save) {
-  clearTimeout(autoTimer); current = structuredClone(save.state); current.workshop=validateWorkshop(current.workshop); const order=activeOrder(current.workshop); if(order?.status==='machining')order.paused=true; dirty = false; autoSuspended = false; station=null; zoom=1;
+  clearTimeout(autoTimer); current = structuredClone(save.state); current.workshop=validateWorkshop(current.workshop); const order=activeOrder(current.workshop); if(order?.status==='machining'){order.paused=true;if(order.piece)order.piece.feeding=0;} dirty = false; autoSuspended = false; station=null; zoom=1;
   try { store.write('auto', makeSave(current)); $('#storage-status').textContent = 'Automatisch auf diesem Gerät gespeichert.'; }
   catch(e) { dirty = true; toast(e.message, true); $('#storage-status').textContent = 'Nicht gespeichert – bitte Sicherung exportieren.'; }
   workshopSummary();
@@ -184,10 +201,10 @@ $('#import-file').addEventListener('change', async e => {
 });
 window.addEventListener('storage', e => {
   if(!e.key?.startsWith('turningpoint.save.v1.')) return;
-  if(current && e.key.endsWith('.auto')) { autoSuspended=true; clearTimeout(autoTimer); const order=activeOrder(current.workshop);if(order?.status==='machining')order.paused=true; if(view==='workshop')renderShop();toast('Ein anderer Tab hat gespeichert. Sichere deine Änderungen bitte manuell.',true); }
+  if(current && e.key.endsWith('.auto')) { autoSuspended=true; clearTimeout(autoTimer); const order=activeOrder(current.workshop);if(order?.status==='machining'){order.paused=true;if(order.piece)order.piece.feeding=0;} if(view==='workshop')renderShop();toast('Ein anderer Tab hat gespeichert. Sichere deine Änderungen bitte manuell.',true); }
   if(view==='home') home();
 });
-document.addEventListener('visibilitychange',()=>{if(document.hidden){const order=current&&activeOrder(current.workshop);if(order?.status==='machining'){order.paused=true;dirty=true;}flushAuto();silenceRadio();}else if(view==='workshop'){lastTick=performance.now();renderShop();syncRadio();}});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){const order=current&&activeOrder(current.workshop);if(order?.status==='machining'){order.paused=true;if(order.piece)order.piece.feeding=0;dirty=true;}flushAuto();silenceRadio();}else if(view==='workshop'){lastTick=performance.now();renderShop();syncRadio();}});
 window.addEventListener('pagehide',flushAuto);
 window.addEventListener('beforeunload',e=>{flushAuto();if(dirty){e.preventDefault();e.returnValue='';}});
 shop.addEventListener('click',event=>{
@@ -195,34 +212,55 @@ shop.addEventListener('click',event=>{
   if(!el || el.disabled)return;
   try{
     if(el.dataset.openMenu!==undefined){flushAuto();home();return;}
-    if(el.dataset.closeStation!==undefined){station=null;renderShop();return;}
-    if(el.dataset.station){station=el.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';if(station==='radio')audioAllowed=true;renderShop();syncRadio();return;}
+    if(el.dataset.closeStation!==undefined){haltMachining();station=null;renderShop();return;}
+    if(el.dataset.station){haltMachining();station=el.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';if(station==='radio')audioAllowed=true;renderShop();syncRadio();return;}
     if(el.dataset.orderTab){orderTab=el.dataset.orderTab;renderShop();return;}
     if(el.dataset.zoom){zoom=el.dataset.zoom==='reset'?1:Math.max(1,Math.min(2,zoom+(el.dataset.zoom==='in' ? 0.25 : -0.25)));renderShop();return;}
     if(el.dataset.work)commitWork(el.dataset.work,el.dataset.arg);
   }catch(e){toast(e.message,true);}
 });
-shop.addEventListener('keydown',event=>{
-  if((event.key==='Enter'||event.key===' ') && event.target.matches('g[data-station]')){
-    event.preventDefault();station=event.target.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';renderShop();
-  }
-});
 shop.addEventListener('submit',event=>{
   if(event.target.id!=='machine-settings')return;event.preventDefault();
   const values=new FormData(event.target);
-  try{commitWork('settings',{rpm:Number(values.get('rpm')),feed:Number(values.get('feed'))});}catch(e){toast(e.message,true);}
+  try{commitWork('settings',{rpm:Number(values.get('rpm')),feed:Number(values.get('feed')),coolant:values.get('coolant')==='on'});}catch(e){toast(e.message,true);}
 });
 shop.addEventListener('change',event=>{
-  if(event.target.id==='radio-volume')try{audioAllowed=true;commitWork('volume',Number(event.target.value));}catch(e){toast(e.message,true);}
+  try{
+    if(event.target.id==='radio-volume'){audioAllowed=true;commitWork('volume',Number(event.target.value));}
+    if(event.target.id==='tool-target')commitWork('target',Number(event.target.value));
+    if(event.target.id==='tool-position')commitWork('position',Number(event.target.value));
+    if(event.target.id==='confirm-scrap'){
+      const o=activeOrder(current.workshop);$('#scrap-piece').disabled=!event.target.checked||(o?.status==='machining'&&!o.paused);
+    }
+  }catch(e){toast(e.message,true);renderShop();}
 });
+shop.addEventListener('pointerdown',event=>{
+  const button=event.target.closest('[data-feed]');if(!button||button.disabled||event.isPrimary===false||(event.button!==undefined&&event.button!==0))return;
+  event.preventDefault();
+  try{button.setPointerCapture?.(event.pointerId);commitWork('feed',Number(button.dataset.feed),true);}catch(e){toast(e.message,true);}
+});
+shop.addEventListener('contextmenu',event=>{if(event.target.closest('[data-feed]'))event.preventDefault();});
+// Delegation keeps hold controls available after station rendering. Space/Enter are equivalent to touch.
+shop.addEventListener('keyup',event=>{if(event.key===' '||event.key==='Enter')releaseFeed();});
+shop.addEventListener('keydown',event=>{
+  const button=event.target.closest('[data-feed]');
+  if(button&&!button.disabled&&(event.key===' '||event.key==='Enter')){
+    event.preventDefault();if(!event.repeat)try{commitWork('feed',Number(button.dataset.feed),true);}catch(e){toast(e.message,true);}
+  }else if((event.key==='Enter'||event.key===' ')&&event.target.matches('g[data-station]')){
+    event.preventDefault();haltMachining();station=event.target.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';renderShop();
+  }
+});
+for(const name of ['pointerup','pointercancel','lostpointercapture','keyup'])window.addEventListener(name,releaseFeed);
+window.addEventListener('blur',()=>{haltMachining();if(view==='workshop')renderShop();});
+shop.addEventListener('focusout',event=>{if(event.target.closest('[data-feed]'))releaseFeed();});
 setInterval(()=>{
   if(view!=='workshop'||!current||document.hidden||autoSuspended){lastTick=performance.now();return;}
   const now=performance.now(),elapsed=Math.min(1000,Math.max(0,now-lastTick));lastTick=now;
-  const order=activeOrder(current.workshop);if(order?.status!=='machining'||order.paused)return;
+  const order=activeOrder(current.workshop);if(order?.status!=='machining')return;
+  if(order.paused&&order.piece.heat<=20)return;
   const done=advance(current.workshop,elapsed);dirty=true;current.updatedAt=new Date().toISOString();persistElapsed+=elapsed;
   if(done||persistElapsed>=1000){persistElapsed=0;flushAuto();}
-  if(done){renderShop();toast('Bearbeitung fertig. Entgrate das Teil am Schraubstock.');}
-  else{const progress=$('#machine-progress');if(progress)progress.value=order.progress;const label=$('#machine-progress-label');if(label)label.textContent=Math.floor(order.progress/jobFor(order).duration*100)+' % · in Bearbeitung';}
+  if(done){renderShop();toast(order.piece.notice);}else refreshMachine();
 },200);
 setInterval(flushAuto,120000);
 if(store.read('auto').status==='unavailable') $('#storage-status').textContent='Browserspeicher gesperrt. Bitte in einem normalen Browser öffnen.';
