@@ -69,7 +69,14 @@ test('Pointer-Abbruch und Fensterfokusverlust beenden den Vorschub',()=>{
 });
 test('Manuelles Fertigen über Ereignisse endet erst nach Ausspannen, Prüfung und Abgabe',()=>{
  const a=app();a.start();a.work('accept','bolt');a.work('select-material','aluminium');a.work('prepare');
+ a.work('cutter','face');a.work('operation','face');
+ for(let n=0;n<5;n++){
+  a.work('position',12);a.work('touch');const p=a.read('auto').state.workshop.orders[0].piece;a.work('depth',Math.min(1.5,p.faceReference-60.02));
+  a.work(a.read('auto').state.workshop.orders[0].status==='prepared'?'start':'pause');a.hold(-1);for(let k=0;k<5;k++)a.tick(1000);a.release();a.work('pause');
+ }
+ a.work('operation','turn');
  for(const target of [22,20.4,20.02]){
+  a.work('cutter',target===20.02?'finish':'rough');
   a.work('depth',(a.read('auto').state.workshop.orders[0].piece.reference-target)/2);a.work('position',0);const o=a.read('auto').state.workshop.orders[0];a.work(o.status==='prepared'?'start':'pause');a.hold(1);
   for(let n=0;n<15;n++)a.tick(1000);a.release();a.work('pause');
  }

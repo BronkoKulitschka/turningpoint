@@ -6,7 +6,7 @@ function prepared(){const w=freshWorkshop();act(w,'accept','bolt');act(w,'select
 test('Maschinenansicht verrät weder Sollkontur noch Live-Durchmesser',()=>{
  const w=prepared(),o=activeOrder(w),html=latheControls(w,o,JOBS[0]);
  assert.doesNotMatch(html,/Ziel-Ø|Soll Ø|Ø AM MEISSEL|Ø min \/ max|20,00|20\.00/);
- assert.match(html,/Noch kein Messwert/);assert.doesNotMatch(machineReadout(w,o,JOBS[0]),/Ø/);
+ assert.match(html,/Noch kein Durchmesser-Messwert/);assert.doesNotMatch(machineReadout(w,o,JOBS[0]),/Ø/);
  assert.ok(html.indexOf('id="machine-live"')<html.indexOf('class="direct-controls"'));
  assert.ok(html.indexOf('id="cut-depth"')<html.indexOf('class="lathe-extras"'));
  assert.ok(html.indexOf('data-work="measure-lathe"')<html.indexOf('class="lathe-extras"'));

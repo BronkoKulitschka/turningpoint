@@ -1,4 +1,4 @@
-import { freshWorkshop, validateWorkshop } from './workshop-state.js?v=006';
+import { freshWorkshop, validateWorkshop } from './workshop-state.js?v=007';
 export const SLOT_IDS = ['auto', '1', '2', '3'];
 export const PREFIX = 'turningpoint.save.v1.';
 const text = (s, max, empty = false) => typeof s === 'string' && s.length <= max && (empty || s.trim().length > 0);

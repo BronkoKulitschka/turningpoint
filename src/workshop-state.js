@@ -1,4 +1,4 @@
-import { blankPiece, validatePiece, qualityReport, cutTick, profileIndex, rewardFor } from './machining.js?v=006';
+import { blankPiece, validatePiece, qualityReport, cutTick, profileIndex, rewardFor, CUTTERS, partLength, faceIndex, keptProfile, activeFaces } from './machining.js?v=007';
 // Spielregeln des Funktionstests. Zeit, Preise und Schnittwerte sind Spielbalancing.
 export const MATERIALS = {
   aluminium: {name:'Aluminium', price:12, color:'#b9c5bc'},
@@ -18,9 +18,9 @@ export const DEFAULT_LAYOUT = [
   {id:'clean',x:135,y:490},{id:'build',x:372,y:295},{id:'cat',x:777,y:631},
 ];
 export function freshWorkshop() {
-  return {version:3,money:250,stock:{aluminium:4,c45:3,brass:2},
+  return {version:4,money:250,stock:{aluminium:4,c45:3,brass:2},
     orders:JOBS.map(j=>({id:j.id,status:'new',progress:0,paused:false,actual:null,measured:false,passes:0,piece:null,payout:null})),
-    active:null,tool:'hss',wear:20,cartReady:false,chips:0,scrap:0,
+    active:null,cutter:'rough',tool:'hss',wear:20,cartReady:false,chips:0,scrap:0,
     coolant:100,settings:{rpm:450,feed:0.1,coolant:false},radio:false,volume:25,light:true,catPets:0,
     room:{width:6,depth:5,extension:false,drill:false,layout:DEFAULT_LAYOUT.map(o=>({...o}))}};
 }
@@ -30,7 +30,7 @@ const bool=v=>typeof v==='boolean';
 export function validateWorkshop(w) {
   if(w===undefined) return freshWorkshop();
   const bad=()=>{throw new Error('Die Werkstattdaten sind beschädigt oder haben eine nicht unterstützte Version.');};
-  if(!w||![1,2,3].includes(w.version)||!integer(w.money,0,1e8)||!w.stock||!w.settings||!w.room||
+  if(!w||![1,2,3,4].includes(w.version)||!integer(w.money,0,1e8)||!w.stock||!w.settings||!w.room||
     !['aluminium','c45','brass'].every(k=>integer(w.stock[k],0,9999))||
     !['hss','carbide'].includes(w.tool)||!finite(w.wear,0,100)||!bool(w.cartReady)||
     !integer(w.chips,0,9999)||!integer(w.scrap,0,9999)||!bool(w.radio)||!bool(w.light)||!finite(w.volume,0,100)||
@@ -38,6 +38,7 @@ export function validateWorkshop(w) {
     !Array.isArray(w.orders)||w.orders.length!==JOBS.length||!bool(w.room.extension)||!bool(w.room.drill)||
     w.room.width!==(w.room.extension?8:6)||w.room.depth!==5||!Array.isArray(w.room.layout)||w.room.layout.length!==DEFAULT_LAYOUT.length)bad();
   if(w.version>=2&&(!finite(w.coolant,0,100)||!bool(w.settings.coolant)))bad();
+  const cutter=w.version<4?'finish':w.cutter;if(!Object.hasOwn(CUTTERS,cutter))bad();
   const orders=JOBS.map(j=>{
     const o=w.orders.find(o=>o?.id===j.id);
     if(!o||!STEPS.includes(o.status)||!finite(o.progress,0,j.duration)||!bool(o.paused)||!bool(o.measured)||
@@ -47,11 +48,11 @@ export function validateWorkshop(w) {
     const needsPiece=STEPS.indexOf(o.status)>=2;
     let piece=null;
     if(w.version===1&&needsPiece){
-      piece=blankPiece(j,j.material,o.actual??j.diameter+4);
+      piece=validatePiece(blankPiece(j,j.material,o.actual??j.diameter+4),j,3);
       // Alte Timerdurchgänge hatten noch kein Profil. Sie beginnen pausiert am Rohling.
       if(o.status==='machining')piece.notice='Update: Dieser alte Durchgang hat noch kein Schnittprofil. Der Rohling ist jetzt manuell zu bearbeiten.';
     }else if(w.version>=2){
-      if(needsPiece){piece=validatePiece(o.piece,j,w.version<3);}else if(o.piece!==null)bad();
+      if(needsPiece){piece=validatePiece(o.piece,j,w.version<4?w.version:0);}else if(o.piece!==null)bad();
     }
     const payout=w.version<3?(o.status==='completed'?j.pay:null):o.payout;
     if(o.status==='completed'?!integer(payout,j.pay,Math.round(j.pay*1.5)):payout!==null)bad();
@@ -65,8 +66,8 @@ export function validateWorkshop(w) {
     const o=w.room.layout.find(o=>o?.id===def.id);
     if(!o||!finite(o.x,0,1200)||!finite(o.y,0,820))bad();return {id:def.id,x:o.x,y:o.y};
   });
-  return {version:3,money:w.money,stock:{aluminium:w.stock.aluminium,c45:w.stock.c45,brass:w.stock.brass},orders,
-    active:w.active,tool:w.tool,wear:w.wear,cartReady:w.cartReady,chips:w.chips,scrap:w.scrap,
+  return {version:4,money:w.money,stock:{aluminium:w.stock.aluminium,c45:w.stock.c45,brass:w.stock.brass},orders,
+    active:w.active,cutter,tool:w.tool,wear:w.wear,cartReady:w.cartReady,chips:w.chips,scrap:w.scrap,
     coolant:w.version===1?100:w.coolant,settings:{rpm:w.settings.rpm,feed:w.settings.feed,coolant:w.version===1?false:w.settings.coolant},radio:w.radio,volume:w.volume,light:w.light,catPets:w.catPets,
     room:{width:w.room.width,depth:5,extension:w.room.extension,drill:w.room.drill,layout}};
 }
@@ -88,8 +89,14 @@ export function act(w,action,arg) {
       need(Object.hasOwn(MATERIALS,arg),'Unbekanntes Material.');need(w.stock[arg]>0,'Dieses Material ist aufgebraucht. Bestelle es am Lagerregal.');
       w.stock[arg]-=1;o.piece=blankPiece(j,arg);o.status='material';return arg===j.material?'Rohling bereit. Rüste jetzt den Werkzeugwagen.':'Dieser Rohling hat den falschen Werkstoff. Du kannst ihn bearbeiten, aber nicht für diesen Auftrag abgeben.';
     case 'buy-material': need(Object.hasOwn(MATERIALS,arg),'Unbekanntes Material.');need(w.stock[arg]<=9996,'Das Materiallager ist voll.');pay(w,MATERIALS[arg].price*3);w.stock[arg]+=3;return 'Drei Rohlinge wurden ins Lager gelegt.';
-    case 'tool': need(['hss','carbide'].includes(arg),'Unbekanntes Werkzeug.');need(o?.status!=='machining','Beende die laufende Bearbeitung vor einem Werkzeugwechsel.');need(w.tool!==arg,'Dieses Werkzeug ist bereits ausgewählt.');if(arg==='carbide')pay(w,12);w.tool=arg;w.cartReady=false;if(o?.status==='prepared')o.status='material';return 'Werkzeug ausgewählt. Am Wagen für den Auftrag bereitlegen.';
-    case 'sharpen': need(o?.status!=='machining','Beende zuerst die laufende Bearbeitung.');need(w.wear>0,'Das Werkzeug ist bereits scharf.');pay(w,5);w.wear=0;return 'Werkzeug instand gesetzt.';
+    case 'cutter':
+      need(Object.hasOwn(CUTTERS,arg),'Unbekannte Meißelform.');need(o?.status!=='machining'||o.paused,'Stoppe zuerst die Spindel für den Meißelwechsel.');
+      w.cutter=arg;return `${CUTTERS[arg].name} eingesetzt. Prüfe Zustellung und Schnittwerte vor dem nächsten Schnitt.`;
+    case 'operation':
+      need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst ein Werkstück ein.');need(o.status!=='machining'||o.paused,'Stoppe zuerst die Spindel.');need(['turn','face'].includes(arg),'Unbekannter Arbeitsgang.');
+      o.piece.operation=arg;o.piece.feeding=0;o.piece.z=Math.min(o.piece.z,partLength(o.piece));return arg==='face'?'Plandrehen: axial zustellen, dann den Meißel radial über die Stirnfläche führen.':'Längsdrehen: radial zustellen, dann den Meißel entlang des Werkstücks führen.';
+    case 'tool': need(['hss','carbide'].includes(arg),'Unbekanntes Werkzeug.');need(o?.status!=='machining'||o.paused,'Stoppe zuerst die Spindel.');need(w.tool!==arg,'Dieses Werkzeug ist bereits ausgewählt.');if(arg==='carbide')pay(w,12);w.tool=arg;return 'Schneidstoff gewechselt. Prüfe die Schnittwerte.';
+    case 'sharpen': need(o?.status!=='machining'||o.paused,'Stoppe zuerst die Spindel.');need(w.wear>0,'Das Werkzeug ist bereits scharf.');pay(w,5);w.wear=0;return 'Werkzeug instand gesetzt.';
     case 'prepare': need(o?.status==='material','Wähle zuerst das passende Rohmaterial.');need(w.wear<85,'Setze das Werkzeug zuerst am Schrank instand.');w.cartReady=true;o.status='prepared';return 'Werkzeug und Messschieber liegen bereit. Die Drehbank ist dran.';
     case 'settings':
       need(o?.status!=='machining'||o.paused,'Stoppe die Spindel vor dem Umstellen.');
@@ -99,12 +106,15 @@ export function act(w,action,arg) {
     case 'touch': {
       need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst einen Rohling ein.');
       need(o.status!=='machining'||o.paused,'Stoppe die Spindel zum Antasten.');
-      const p=o.piece;p.reference=p.diameters[profileIndex(p,j,p.z)];p.depth=0;p.target=p.reference;
+      const p=o.piece;
+      if(p.operation==='face'){p.faceReference=p.faces[faceIndex(p,j,p.faceR)];p.faceDepth=0;p.notice='Stirnfläche angetastet. Axiale Zustellung auf null.';return p.notice;}
+      p.reference=p.diameters[profileIndex(p,j,p.z)];p.depth=0;p.target=p.reference;
       p.notice='Schneide an dieser Stelle angetastet. Die radiale Zustellung steht auf null.';return p.notice;
     }
     case 'depth': {
       need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst einen Rohling ein.');
       const depth=Number(arg);need(finite(depth,0,3),'Schnitttiefe zwischen 0 und 3 mm wählen.');
+      if(o.piece.operation==='face'){need(depth<=1.5&&o.piece.faceReference-depth>=1,'Axiale Zustellung bis 1,5 mm innerhalb des Werkstücks wählen.');o.piece.faceDepth=depth;o.piece.notice='Axiale Zustellung eingestellt. Kürzen erfolgt beim radialen Werkzeugweg.';return o.piece.notice;}
       const target=o.piece.reference-2*depth;need(target>=1,'Der Querschlitten erreicht seine mechanische Grenze.');
       o.piece.depth=depth;o.piece.target=target;o.piece.notice='Radiale Schnitttiefe eingestellt. Der nächste Werkzeugweg schneidet mit dieser Zustellung.';
       return o.piece.notice;
@@ -112,18 +122,23 @@ export function act(w,action,arg) {
     case 'probe-position':
       need(o?.piece&&['prepared','machining'].includes(o.status),'Das Werkstück muss eingespannt sein.');
       need(o.status!=='machining'||o.paused,'Stoppe die Spindel zum Anlegen des Messschiebers.');
-      need(finite(Number(arg),0,j.length),'Messstelle außerhalb des Werkstücks.');o.piece.probeZ=Number(arg);return 'Messstelle ausgewählt. Lege jetzt den Messschieber an.';
+      need(finite(Number(arg),0,partLength(o.piece)),'Messstelle außerhalb des Werkstücks.');o.piece.probeZ=Number(arg);return 'Messstelle ausgewählt. Lege jetzt den Messschieber an.';
     case 'measure-lathe': {
       need(o?.piece&&['prepared','machining'].includes(o.status),'Das Werkstück muss eingespannt sein.');
       need(o.status!=='machining'||o.paused,'Messen ist nur bei stehender Spindel möglich.');
-      const p=o.piece;p.reading={z:p.probeZ,diameter:Number(p.diameters[profileIndex(p,j,p.probeZ)].toFixed(2)),revision:p.revision};
+      const p=o.piece;need(p.probeZ<=Math.min(...activeFaces(p).map(v=>v.l)),'Diese Messstelle liegt außerhalb der vollständig erhaltenen Länge. Wähle eine Stelle weiter links.');p.reading={z:p.probeZ,diameter:Number(p.diameters[profileIndex(p,j,p.probeZ)].toFixed(2)),revision:p.revision};
       p.notice='Messschieber angelegt. Der Messwert gilt nur für diese Stelle und diesen Bearbeitungsstand.';
       return p.notice;
+    }
+    case 'measure-length': {
+      need(o?.piece&&['prepared','machining'].includes(o.status),'Das Werkstück muss eingespannt sein.');need(o.status!=='machining'||o.paused,'Länge nur bei stehender Spindel messen.');
+      const p=o.piece;p.lengthReading={length:Number(partLength(p).toFixed(2)),revision:p.revision};p.notice='Gesamtlänge gemessen. Eine unebene Stirnfläche kann trotzdem Nacharbeit erfordern.';return p.notice;
     }
     case 'position':
       need(o?.piece&&['prepared','machining'].includes(o.status),'Spanne zuerst einen Rohling ein.');
       need(o.status!=='machining'||o.paused,'Zum freien Positionieren muss die Spindel stehen.');
-      need(finite(Number(arg),0,j.length),'Position außerhalb des Werkstücks.');o.piece.z=Number(arg);o.piece.feeding=0;return 'Schlitten positioniert.';
+      if(o.piece.operation==='face'){need(finite(Number(arg),0,(j.diameter+4)/2),'Radialposition außerhalb des Arbeitswegs.');o.piece.faceR=Number(arg);o.piece.feeding=0;return 'Radialer Schlitten positioniert.';}
+      need(finite(Number(arg),0,partLength(o.piece)),'Position außerhalb des Werkstücks.');o.piece.z=Number(arg);o.piece.feeding=0;return 'Schlitten positioniert.';
     case 'start':
       need(o?.status==='prepared'&&w.cartReady,'Bereite zuerst Material und Werkzeugwagen vor.');need(w.wear<85,'Das Werkzeug ist zu stumpf.');need(w.chips<5,'Reinige zuerst den Arbeitsplatz.');
       o.status='machining';o.paused=false;o.actual=null;o.measured=false;o.piece.feeding=0;return 'Spindel läuft. Halte eine Vorschubtaste, um selbst zu schneiden.';
@@ -136,7 +151,7 @@ export function act(w,action,arg) {
       need(Number(arg)===0||!o.paused,'Schalte zuerst die Spindel ein.');o.piece.feeding=Number(arg);return Number(arg)?'Vorschub aktiv – Taste halten.':'Vorschub angehalten.';
     case 'finish-cut':
       need(o?.status==='machining'&&o.paused,'Stoppe vor dem Ausspannen die Spindel.');
-      o.status='machined';o.progress=j.duration;o.actual=Math.max(...o.piece.diameters);o.piece.feeding=0;
+      o.status='machined';o.progress=j.duration;o.actual=Math.max(...keptProfile(o.piece).map(v=>v.d));o.piece.feeding=0;
       if(o.piece.removed>0){w.chips=Math.min(9999,w.chips+1);o.piece.removed=0;}return 'Werkstück ausgespannt. Entgrate es und prüfe die Fertigung.';
     case 'scrap-piece':
       need(o?.piece&&!['new','accepted','completed'].includes(o.status),'Es gibt kein Werkstück zum Verwerfen.');
@@ -150,7 +165,7 @@ export function act(w,action,arg) {
       return qualityReport(o,j).reasons.join(' ');
     case 'rework':
       need(o&&['deburred','checked'].includes(o.status)&&o.measured,'Prüfe das Werkstück vor der Nacharbeit.');
-      need(!qualityReport(o,j).undersize&&o.piece.material===j.material,'Untermaß oder falscher Werkstoff: Für diesen Auftrag ist ein neuer Rohling nötig.');
+      need(!qualityReport(o,j).undersize&&o.piece.material===j.material,'Untermaß, zu kurze Länge oder falscher Werkstoff: Für diesen Auftrag ist ein neuer Rohling nötig.');
       need(w.wear<85,'Setze das Werkzeug vor der Nacharbeit instand.');need(w.chips<5,'Reinige zuerst den Arbeitsplatz.');
       o.status='prepared';o.passes=Math.min(100,o.passes+1);o.measured=false;w.cartReady=true;o.piece.z=0;o.piece.feeding=0;
       return 'Dasselbe Teil ist wieder eingespannt. Trage nur das verbliebene Aufmaß ab.';

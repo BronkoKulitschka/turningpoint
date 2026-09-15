@@ -1,7 +1,7 @@
-import { machineReadout, measurementText } from './lathe-ui.js?v=006';
-import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=006';
-import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=006';
-import { workshopHTML } from './workshop-ui.js?v=006';
+import { machineReadout, measurementText } from './lathe-ui.js?v=007';
+import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=007';
+import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=007';
+import { workshopHTML } from './workshop-ui.js?v=007';
 
 const $ = s => document.querySelector(s);
 const panel = $('#panel');
@@ -56,7 +56,7 @@ function refreshMachine(){
     const details=live.querySelector?.('details');if(details)details.open=!!expanded;
     const reading=$('#lathe-reading');if(reading)reading.textContent=measurementText(o.piece);
     const notice=$('#cut-notice');if(notice)notice.textContent=o.piece.notice;
-    const depth=$('#cut-depth');if(depth&&document.activeElement!==depth)depth.value=o.piece.depth.toFixed(3);
+    const depth=$('#cut-depth');if(depth&&document.activeElement!==depth)depth.value=(o.piece.operation==='face'?o.piece.faceDepth:o.piece.depth).toFixed(3);
   }
 }
 function releaseFeed(event){
@@ -74,8 +74,8 @@ function commitWork(action,arg,quiet=false){
   if(!current)return;
   if(autoSuspended)throw new Error('Ein anderer Tab hat gespeichert. Sichere deinen Stand manuell und lade ihn anschließend über das Menü.');
   const copy=validateWorkshop(current.workshop);
-  if(action==='depth-step'){const p=activeOrder(copy)?.piece;if(!p)return;arg=Math.max(0,Math.min(3,Math.round((p.depth+Number(arg))*1000)/1000));action='depth';}
-  if(['depth','probe-position','measure-lathe','touch'].includes(action))quiet=true;
+  if(action==='depth-step'){const p=activeOrder(copy)?.piece;if(!p)return;arg=Math.max(0,Math.min(p.operation==='face'?1.5:3,Math.round(((p.operation==='face'?p.faceDepth:p.depth)+Number(arg))*1000)/1000));action='depth';}
+  if(['depth','probe-position','measure-lathe','measure-length','touch'].includes(action))quiet=true;
   const result=act(copy,action,arg);current.workshop=copy;
   current.updatedAt=new Date().toISOString();dirty=true;flushAuto();
   if(action==='accept')orderTab='active';if(action==='deliver')orderTab='done';
@@ -239,6 +239,7 @@ shop.addEventListener('submit',event=>{
 shop.addEventListener('change',event=>{
   try{
     if(event.target.id==='radio-volume'){audioAllowed=true;commitWork('volume',Number(event.target.value));}
+    if(event.target.id==='cutter-choice')commitWork('cutter',event.target.value);
     if(event.target.id==='cut-depth')commitWork('depth',Number(event.target.value));
     if(event.target.id==='probe-position')commitWork('probe-position',Number(event.target.value));
     if(event.target.id==='tool-position')commitWork('position',Number(event.target.value));

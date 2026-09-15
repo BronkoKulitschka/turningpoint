@@ -1,14 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { freshWorkshop, validateWorkshop, act, advance, activeOrder, nextTask, JOBS } from '../src/workshop-state.js';
-import { qualityReport, rewardFor } from '../src/machining.js';
+import { qualityReport, rewardFor, partLength, keptProfile } from '../src/machining.js';
 import { makeSave, newState, validateSave, createStore } from '../src/storage.js';
 const step=(w,a,arg)=>{const result=act(w,a,arg);validateWorkshop(w);return result;};
 function ready(id='bolt',material){const w=freshWorkshop(),j=JOBS.find(j=>j.id===id);step(w,'accept',id);step(w,'select-material',material??j.material);step(w,'prepare');step(w,'depth',.5);return w;}
-function pass(w,target,{feed=.1,rpm=450,coolant=true,direction=1}={}){
+function faceTo(w,target){
  const o=activeOrder(w),j=JOBS.find(j=>j.id===o.id);
  if(o.status==='machining'&&!o.paused)step(w,'pause');
- step(w,'settings',{rpm,feed,coolant});step(w,'position',direction===1?0:j.length);step(w,'touch');step(w,'depth',(o.piece.reference-target)/2);
+ step(w,'settings',{rpm:450,feed:.1,coolant:true});step(w,'operation','face');step(w,'cutter','face');
+ for(let n=0;n<12&&partLength(o.piece)>target+.015;n++){
+  step(w,'position',(j.diameter+4)/2);step(w,'touch');step(w,'depth',Math.min(1.5,o.piece.faceReference-target));step(w,o.status==='prepared'?'start':'pause');step(w,'feed',-1);
+  for(let k=0;k<400&&o.piece.feeding;k++)advance(w,100);
+  assert.equal(o.paused,false,o.piece.notice);step(w,'pause');
+ }
+ step(w,'operation','turn');
+}
+function pass(w,target,{feed=.1,rpm=450,coolant=true,direction=1}={}){
+ const o=activeOrder(w),j=JOBS.find(j=>j.id===o.id);
+ if(o.piece.faceSurface.some(v=>v===12))faceTo(w,j.length+.02);
+ if(o.status==='machining'&&!o.paused)step(w,'pause');
+ step(w,'settings',{rpm,feed,coolant});step(w,'position',direction===1?0:j.length);step(w,'touch');step(w,'cutter',(o.piece.reference-target)/2>.35?'rough':'finish');step(w,'depth',(o.piece.reference-target)/2);
  step(w,o.status==='prepared'?'start':'pause');step(w,'feed',direction);
  for(let n=0;n<2000&&o.piece.feeding;n++)advance(w,100);
  validateWorkshop(w);return o;
@@ -32,16 +44,16 @@ test('Spindel allein und losgelassener Vorschub entfernen kein Material',()=>{
 test('Nur überfahrene Abschnitte werden geschnitten; beide Vorschubrichtungen funktionieren',()=>{
  const w=ready();step(w,'position',30);step(w,'start');step(w,'feed',1);advance(w,1000);step(w,'feed',0);
  const p=activeOrder(w).piece;assert.equal(p.diameters[0],24);assert.ok(p.diameters[13]<24);assert.equal(p.diameters.at(-1),24);
- step(w,'pause');step(w,'position',60);step(w,'pause');step(w,'feed',-1);advance(w,1000);assert.ok(p.diameters.at(-1)<24);
+ step(w,'pause');step(w,'position',partLength(p));step(w,'pause');step(w,'feed',-1);advance(w,1000);assert.ok(p.diameters.at(-1)<24);
 });
 test('Untermaß bleibt irreversibel und kostet beim Neustart einen weiteren Rohling',()=>{
  const w=ready();pass(w,22);pass(w,20.4);pass(w,19.8);inspect(w);
  assert.equal(qualityReport(activeOrder(w),JOBS[0]).undersize,true);assert.throws(()=>act(w,'deliver'));assert.throws(()=>act(w,'rework'));
- const old=[...activeOrder(w).piece.diameters];assert.ok(old.every(d=>d<19.9));step(w,'scrap-piece');assert.equal(w.stock.aluminium,3);step(w,'select-material','aluminium');assert.equal(w.stock.aluminium,2);assert.equal(w.scrap,1);
+ const old=keptProfile(activeOrder(w).piece).map(v=>v.d);assert.ok(old.every(d=>d<19.9));step(w,'scrap-piece');assert.equal(w.stock.aluminium,3);step(w,'select-material','aluminium');assert.equal(w.stock.aluminium,2);assert.equal(w.scrap,1);
 });
 test('Übermaß kann auf demselben Rohling nachgearbeitet werden',()=>{
  const w=ready();pass(w,22);pass(w,20.4);inspect(w);assert.equal(activeOrder(w).status,'deburred');step(w,'rework');
- assert.ok(activeOrder(w).piece.diameters.every(d=>d<20.5));pass(w,20.02);inspect(w);step(w,'deliver');assert.equal(w.money,250+w.orders[0].payout);assert.equal(w.stock.aluminium,3);
+ assert.ok(keptProfile(activeOrder(w).piece).every(v=>v.d<20.5));pass(w,20.02);inspect(w);step(w,'deliver');assert.equal(w.money,250+w.orders[0].payout);assert.equal(w.stock.aluminium,3);
 });
 test('Falscher Werkstoff ist wählbar, wird verbraucht und von der Abnahme zurückgewiesen',()=>{
  const w=ready('bolt','brass');pass(w,22);pass(w,20.4);pass(w,20.02);inspect(w);
@@ -58,15 +70,15 @@ test('Zu tiefer Schnitt löst Überlast aus und verschleißt das Werkzeug',()=>{
 });
 test('Drehzahl, Werkstoff, Kühlung und Werkzeug haben messbare Folgen',()=>{
  const dry=ready('pin'),wet=ready('pin');pass(dry,19,{rpm:800,coolant:false});pass(wet,19,{rpm:800,coolant:true});
- assert.ok(activeOrder(dry).piece.heat>activeOrder(wet).piece.heat);assert.equal(dry.coolant,100);assert.ok(wet.coolant<100);
+ assert.ok(activeOrder(dry).piece.heat>activeOrder(wet).piece.heat);assert.ok(wet.coolant<dry.coolant);
  const low=ready(),high=ready();pass(low,23,{rpm:300});pass(high,23,{rpm:1200});assert.ok(activeOrder(high).piece.seconds<activeOrder(low).piece.seconds);
- const hss=ready(),carbide=ready();step(carbide,'tool','carbide');step(carbide,'prepare');pass(hss,23,{rpm:1200});pass(carbide,23,{rpm:1200});assert.ok(carbide.wear<hss.wear);assert.equal(carbide.money,238);
+ const hss=ready(),carbide=ready();step(carbide,'tool','carbide');pass(hss,23,{rpm:1200});pass(carbide,23,{rpm:1200});assert.ok(carbide.wear<hss.wear);assert.equal(carbide.money,238);
  const soft=ready(),hard=ready('bolt','c45');pass(soft,23,{coolant:false});pass(hard,23,{coolant:false});assert.ok(hard.wear>soft.wear);
 });
 test('Einstellungen und Positionieren sind bei laufender Spindel gesperrt; leere Kühlung hat keine Wirkung',()=>{
  const w=ready();step(w,'start');const before=structuredClone(w);
  for(const [a,arg] of [['position',30],['touch'],['settings',{rpm:800,feed:.2,coolant:true}],['finish-cut'],['scrap-piece'],['deliver']]){assert.throws(()=>act(w,a,arg));assert.deepEqual(w,before);}
- const a=ready('pin'),b=ready('pin');a.coolant=0;b.coolant=0;pass(a,19,{coolant:true});pass(b,19,{coolant:false});assert.equal(activeOrder(a).piece.heat,activeOrder(b).piece.heat);
+ const a=ready('pin'),b=ready('pin');faceTo(a,45.02);faceTo(b,45.02);a.coolant=0;b.coolant=0;pass(a,19,{coolant:true});pass(b,19,{coolant:false});assert.equal(activeOrder(a).piece.heat,activeOrder(b).piece.heat);
 });
 test('Profile, Wärme und Einstellungen überleben Speichern; Pausieren verhindert weiteren Abtrag',()=>{
  const state=newState('Werkstatt','Robin');state.workshop=ready();const w=state.workshop;step(w,'start');step(w,'feed',1);advance(w,700);step(w,'pause');
@@ -76,7 +88,7 @@ test('Profile, Wärme und Einstellungen überleben Speichern; Pausieren verhinde
 test('Update-004-Spielstände migrieren laufende und abgeschlossene Werkstücke ohne Verlust der Kasse',()=>{
  const w=ready();w.version=1;delete w.coolant;delete w.settings.coolant;for(const o of w.orders)delete o.piece;
  w.orders[0].status='machining';w.orders[0].progress=1700;
- const migrated=validateWorkshop(w);assert.equal(migrated.version,3);assert.equal(migrated.orders[0].paused,true);assert.ok(migrated.orders[0].piece.diameters.every(d=>d===24));assert.equal(migrated.stock.aluminium,3);
+ const migrated=validateWorkshop(w);assert.equal(migrated.version,4);assert.equal(migrated.orders[0].paused,true);assert.ok(migrated.orders[0].piece.diameters.every(d=>d===24));assert.equal(migrated.stock.aluminium,3);
  w.orders[0]={...w.orders[0],status:'completed',actual:20.04,measured:true,progress:12000};w.active=null;w.money=340;
  const done=validateWorkshop(w);assert.equal(done.money,340);assert.equal(done.orders[0].status,'completed');validateWorkshop(done);
 });
@@ -125,7 +137,7 @@ test('Gespeicherter Messwert verändert sich beim Weiterdrehen nicht und wird al
  assert.deepEqual(p.reading,old);assert.ok(p.revision>p.reading.revision);step(w,'pause');const restored=validateWorkshop(JSON.parse(JSON.stringify(w)));assert.deepEqual(activeOrder(restored).piece.reading,old);
 });
 test('Genauigkeitsbonus steigt bis 50 Prozent; schlechtester Abschnitt zählt',()=>{
- const w=ready(),o=activeOrder(w);o.piece.surface.fill(1);
+ const w=ready(),o=activeOrder(w);o.piece.surface.fill(1);o.piece.faces.fill(JOBS[0].length);o.piece.faceSurface.fill(1);
  const values=[];for(const d of [20.10,20.05,20.00]){o.piece.diameters.fill(d);values.push(rewardFor(o,JOBS[0]).total);}
  assert.deepEqual(values,[90,113,135]);o.piece.diameters[12]=20.1;assert.equal(rewardFor(o,JOBS[0]).total,90);
  o.piece.diameters[12]=19.8;assert.equal(rewardFor(o,JOBS[0]).total,0);
@@ -141,10 +153,59 @@ test('Auch ein bestandenes Teil lässt sich für einen höheren Bonus erneut ein
 });
 test('Update 005 behält Profil, Werkzeugposition und historische Auszahlungen',()=>{
  const w=ready();pass(w,22);const profile=[...activeOrder(w).piece.diameters],target=activeOrder(w).piece.target;
- w.version=2;for(const o of w.orders){delete o.payout;if(o.piece)for(const key of ['reference','depth','probeZ','reading','revision'])delete o.piece[key];}
- const restored=validateWorkshop(w);assert.equal(restored.version,3);assert.deepEqual(activeOrder(restored).piece.diameters,profile);assert.equal(activeOrder(restored).piece.target,target);assert.equal(activeOrder(restored).piece.reading,null);validateWorkshop(restored);
+ activeOrder(w).piece.z=Math.min(activeOrder(w).piece.z,60);w.version=2;for(const o of w.orders){delete o.payout;if(o.piece)for(const key of ['reference','depth','probeZ','reading','revision'])delete o.piece[key];}
+ const restored=validateWorkshop(w);assert.equal(restored.version,4);assert.deepEqual(activeOrder(restored).piece.diameters,profile);assert.equal(activeOrder(restored).piece.target,target);assert.equal(activeOrder(restored).piece.reading,null);validateWorkshop(restored);
 });
 test('Manipulierte Messwerte, Zustellungen und Auszahlungen werden abgewiesen',()=>{
  const w=ready();step(w,'measure-lathe');
  for(const mutate of [x=>x.orders[0].piece.depth=-1,x=>x.orders[0].piece.reading.diameter='24',x=>x.orders[0].piece.reading.revision=999,x=>x.orders[0].payout=135]){const copy=structuredClone(w);mutate(copy);assert.throws(()=>validateWorkshop(copy));}
+});
+
+test('Neue Rohlinge haben Längenaufmaß; Länge wird erst auf Anforderung gemessen',()=>{
+ const w=ready(),o=activeOrder(w);assert.equal(partLength(o.piece),66);assert.equal(o.piece.lengthReading,null);
+ step(w,'measure-length');assert.equal(o.piece.lengthReading.length,66);assert.equal(o.status,'prepared');
+ step(w,'start');assert.throws(()=>act(w,'measure-length'));assert.throws(()=>act(w,'operation','face'));assert.throws(()=>act(w,'cutter','face'));
+});
+test('Plandrehen schneidet nur überfahrene Radialabschnitte und stoppt beim Loslassen',()=>{
+ const w=ready(),p=activeOrder(w).piece;step(w,'operation','face');step(w,'cutter','face');step(w,'touch');step(w,'depth',.5);step(w,'start');
+ advance(w,500);assert.ok(p.faces.every(l=>l===66));step(w,'feed',-1);advance(w,300);step(w,'feed',0);
+ assert.ok(p.faces.some(l=>l<66));assert.ok(p.faces.some(l=>l===66));assert.equal(partLength(p),66);const partial=[...p.faces];advance(w,1000);assert.deepEqual(p.faces,partial);
+});
+test('Länge und Manteldurchmesser sind unabhängige Bearbeitungsaufgaben',()=>{
+ const w=ready(),p=activeOrder(w).piece;faceTo(w,60.02);assert.ok(partLength(p)<60.04);assert.ok(p.diameters.every(d=>d===24));
+ const faces=[...p.faces];pass(w,22);assert.deepEqual(p.faces,faces);assert.ok(keptProfile(p).every(v=>v.d<22.1));
+});
+test('Zu kurze Stirnfläche ist irreversibel; Nacharbeit kann keine Länge hinzufügen',()=>{
+ const w=ready();faceTo(w,59.7);inspect(w);const o=activeOrder(w);assert.equal(qualityReport(o,JOBS[0]).tooShort,true);assert.throws(()=>act(w,'rework'));assert.throws(()=>act(w,'deliver'));
+ step(w,'scrap-piece');step(w,'select-material','aluminium');assert.equal(w.stock.aluminium,2);assert.equal(partLength(activeOrder(w).piece),66);
+});
+test('Gleiche Zustellung mit verschiedenen Meißeln erzeugt unterschiedliche Oberflächen',()=>{
+ const rough=ready(),finish=ready();for(const [w,c] of [[rough,'rough'],[finish,'finish']]){step(w,'cutter',c);step(w,'depth',.2);step(w,'start');step(w,'feed',1);advance(w,1000);}
+ const a=activeOrder(rough).piece,b=activeOrder(finish).piece;assert.ok(a.surface[0]>3.2);assert.ok(b.surface[0]<3.2);assert.ok(a.surface[0]>b.surface[0]+2);
+});
+test('Feiner Schlichtmeißel überlastet bei einem Schnitt, den der Schruppmeißel bewältigt',()=>{
+ const rough=ready('pin'),finish=ready('pin');for(const [w,c] of [[rough,'rough'],[finish,'finish']]){step(w,'cutter',c);step(w,'depth',1);step(w,'start');step(w,'feed',1);advance(w,300);}
+ assert.equal(activeOrder(rough).paused,false);assert.equal(activeOrder(finish).paused,true);assert.match(activeOrder(finish).piece.notice,/Überlast/);
+});
+test('Werkzeugwechsel glättet nichts von allein; ein echter Schlichtschnitt ist erforderlich',()=>{
+ const w=ready();pass(w,22);const p=activeOrder(w).piece,before=[...p.surface];step(w,'pause');step(w,'cutter','finish');assert.deepEqual(p.surface,before);
+ pass(w,21.8);assert.ok(keptProfile(p).every(v=>v.ra<3.2));
+});
+test('Längenmessung bleibt als ältere Messung erhalten; Planfortschritt wird gespeichert',()=>{
+ const w=ready();step(w,'measure-length');step(w,'operation','face');step(w,'cutter','face');step(w,'depth',.3);step(w,'start');step(w,'feed',-1);advance(w,300);step(w,'pause');
+ const p=activeOrder(w).piece;assert.ok(p.revision>p.lengthReading.revision);assert.equal(p.lengthReading.length,66);
+ const restored=validateWorkshop(JSON.parse(JSON.stringify(w)));assert.deepEqual(activeOrder(restored).piece.faces,p.faces);assert.equal(restored.cutter,'face');assert.equal(activeOrder(restored).piece.operation,'face');
+});
+test('Längenfehler senken den Bonus auch bei perfektem Durchmesser',()=>{
+ const w=ready(),o=activeOrder(w);o.piece.diameters.fill(20);o.piece.surface.fill(1);o.piece.faceSurface.fill(1);
+ const totals=[];for(const length of [60.2,60.1,60]){o.piece.faces.fill(length);totals.push(rewardFor(o,JOBS[0]).total);}
+ assert.deepEqual(totals,[90,113,135]);o.piece.faces[0]=59.7;assert.equal(rewardFor(o,JOBS[0]).total,0);
+});
+test('Update 006 migriert alte fertige Teile ohne Verlängerung oder rückwirkende Auszahlung',()=>{
+ const w=ready();cutGood(w,JOBS[0]);inspect(w);step(w,'deliver');const money=w.money,payout=w.orders[0].payout;
+ w.version=3;delete w.cutter;for(const o of w.orders){if(!o.piece)continue;for(const key of ['stockLength','stockRadius','faces','faceSurface','operation','faceR','faceReference','faceDepth','lengthReading'])delete o.piece[key];o.piece.z=Math.min(o.piece.z,60);o.piece.diameters.fill(20.02);o.piece.surface.fill(1);}
+ const saved=validateWorkshop(w);assert.equal(saved.version,4);assert.equal(partLength(saved.orders[0].piece),60);assert.equal(saved.money,money);assert.equal(saved.orders[0].payout,payout);validateWorkshop(saved);
+});
+test('Beschädigte Längen und unbekannte Meißel werden beim Laden abgelehnt',()=>{
+ const w=ready();for(const mutate of [s=>s.cutter='laser',s=>s.orders[0].piece.faces.pop(),s=>s.orders[0].piece.faces[0]=70,s=>s.orders[0].piece.faceDepth=5,s=>s.orders[0].piece.faceR=-1,s=>s.orders[0].piece.lengthReading={length:Infinity,revision:0}]){const copy=structuredClone(w);mutate(copy);assert.throws(()=>validateWorkshop(copy));}
 });
