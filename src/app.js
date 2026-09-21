@@ -1,7 +1,7 @@
-import { machineReadout, measurementText } from './lathe-ui.js?v=007';
-import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=007';
-import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=007';
-import { workshopHTML } from './workshop-ui.js?v=007';
+import { machineReadout, measurementText } from './lathe-ui.js?v=008';
+import { SLOT_IDS, createStore, makeSave, newState, validateSave } from './storage.js?v=008';
+import { act, advance, activeOrder, jobFor, validateWorkshop } from './workshop-state.js?v=008';
+import { workshopHTML } from './workshop-ui.js?v=008';
 
 const $ = s => document.querySelector(s);
 const panel = $('#panel');
@@ -32,11 +32,32 @@ function syncRadio() {
     if($('#audio-state'))$('#audio-state').textContent='Werkstattklang läuft.';
   }catch(e){toast(e.message,true);}
 }
+let latheView=null, latheLoading=false, latheFailed=false, latheViewMode='detail';
+function syncLathe3D(){
+  // Im DOM-Testadapter sowie ohne WebGL bleibt die vollständige 2D-Bedienung aktiv.
+  if(!window.WebGL2RenderingContext)return;
+  if(view!=='workshop'||station!=='lathe'){latheView?.detach();return;}
+  const host=$('#lathe-3d');if(!host)return;
+  const w=current.workshop,o=activeOrder(w),fallback=$('#machine-live'),status=$('.lathe-view-status');
+  const buttons=shop.querySelectorAll?.('[data-lathe-view]');
+  buttons?.forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.latheView===latheViewMode)));
+  if(latheView){
+    const ok=latheView.mount(host,w,o,latheViewMode);
+    if(fallback)fallback.hidden=ok&&latheViewMode!=='sketch';
+    if(status)status.textContent=!ok?'3D nicht verfügbar · Schnittansicht aktiv':latheViewMode==='sketch'?'Schnittansicht':'3D · Ziehen zum Drehen';
+    return;
+  }
+  if(latheFailed){if(status)status.textContent='3D nicht verfügbar · Schnittansicht aktiv';return;}
+  if(!latheLoading){latheLoading=true;if(status)status.textContent='3D-Drehbank wird geladen …';
+    import('./lathe-3d.js?v=008').then(m=>m.createLatheView()).then(v=>{latheView=v;syncLathe3D();}).catch(()=>{latheFailed=true;syncLathe3D();});
+  }
+}
 function leaveWorkshop(){
   if(current && view==='workshop'){
     const order=activeOrder(current.workshop);
     if(order?.status==='machining'&&!order.paused){order.paused=true;if(order.piece)order.piece.feeding=0;dirty=true;flushAuto();}
   }
+  latheView?.detach();
   shop.hidden=true;$('.workbench').hidden=false;silenceRadio();
 }
 function renderShop(){
@@ -46,11 +67,13 @@ function renderShop(){
   shop.innerHTML=workshopHTML(current.workshop,current.workshopName,station,orderTab,zoom);
   const nextExtra=$('.lathe-extras');if(nextExtra)nextExtra.scrollTop=extraY;
   const nextScroll=$('.scene-scroll');if(nextScroll){nextScroll.scrollLeft=x;nextScroll.scrollTop=y;}
+  syncLathe3D();
   const saved=$('#shop-save-state');if(saved)saved.textContent=autoSuspended?'Autosave wegen eines anderen Tabs angehalten. Bitte manuell sichern.':dirty?'Noch nicht gespeichert – bitte über das Menü sichern.':'✓ Fortschritt automatisch auf diesem Gerät gesichert.';
 }
 function refreshMachine(){
   const o=current&&activeOrder(current.workshop),live=$('#machine-live');
   if(station==='lathe'&&o?.piece&&live){
+    latheView?.sync(current.workshop,o);
     const expanded=live.querySelector?.('details')?.open;
     live.innerHTML=machineReadout(current.workshop,o,jobFor(o));
     const details=live.querySelector?.('details');if(details)details.open=!!expanded;
@@ -220,9 +243,10 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden){const orde
 window.addEventListener('pagehide',flushAuto);
 window.addEventListener('beforeunload',e=>{flushAuto();if(dirty){e.preventDefault();e.returnValue='';}});
 shop.addEventListener('click',event=>{
-  const el=event.target.closest('[data-station],[data-work],[data-open-menu],[data-close-station],[data-order-tab],[data-zoom]');
+  const el=event.target.closest('[data-station],[data-work],[data-open-menu],[data-close-station],[data-order-tab],[data-zoom],[data-lathe-view]');
   if(!el || el.disabled)return;
   try{
+    if(el.dataset.latheView){releaseFeed();latheViewMode=el.dataset.latheView;syncLathe3D();return;}
     if(el.dataset.openMenu!==undefined){flushAuto();home();return;}
     if(el.dataset.closeStation!==undefined){haltMachining();station=null;renderShop();return;}
     if(el.dataset.station){haltMachining();station=el.dataset.station;if(station==='desk')orderTab=activeOrder(current.workshop)?'active':'new';if(station==='radio')audioAllowed=true;renderShop();syncRadio();return;}

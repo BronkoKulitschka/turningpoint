@@ -1,4 +1,4 @@
-import { blankPiece, validatePiece, qualityReport, cutTick, profileIndex, rewardFor, CUTTERS, partLength, faceIndex, keptProfile, activeFaces } from './machining.js?v=007';
+import { blankPiece, validatePiece, qualityReport, cutTick, profileIndex, rewardFor, CUTTERS, partLength, faceIndex, keptProfile, activeFaces } from './machining.js?v=008';
 // Spielregeln des Funktionstests. Zeit, Preise und Schnittwerte sind Spielbalancing.
 export const MATERIALS = {
   aluminium: {name:'Aluminium', price:12, color:'#b9c5bc'},

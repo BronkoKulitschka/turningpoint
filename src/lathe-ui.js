@@ -1,4 +1,4 @@
-import { qualityReport, CUTTERS, partLength } from './machining.js?v=007';
+import { qualityReport, CUTTERS, partLength } from './machining.js?v=008';
 const decimal=(n,d=2)=>n.toLocaleString('de-DE',{minimumFractionDigits:d,maximumFractionDigits:d});
 const safe=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export function measurementText(p){
@@ -34,15 +34,18 @@ export function machineReadout(w,o,j){
  <text x="105" y="203" fill="#c7c8aa" font-size="10" font-family="monospace">${face?'X Radius '+decimal(p.faceR,1):'Z '+decimal(p.z,1)} mm · Last ${decimal(spinning?p.load:0,0)} % · ${decimal(p.heat,0)} °C</text>
  <text x="500" y="125" fill="#a5b798" font-size="10" font-family="monospace">Z →</text></svg>`;
 }
+function latheStage(w,o,j){
+ return `<div class="lathe-view-tabs" aria-label="Drehbankansicht"><button type="button" data-lathe-view="detail">Nahansicht</button><button type="button" data-lathe-view="whole">Ganze Drehbank</button><button type="button" data-lathe-view="sketch">Schnittansicht</button></div><div class="lathe-viewport"><div id="lathe-3d" hidden></div><div id="machine-live">${o?.piece?machineReadout(w,o,j):'<p class="empty-machine">Noch kein Rohling eingespannt.</p>'}</div><span class="lathe-view-status">Schnittansicht</span></div>`;
+}
 export function latheControls(w,o,j){
  const p=o?.piece,engaged=o?.status==='machining',spinning=engaged&&!o.paused;
  const face=p?.operation==='face';
  const working=!!p&&['prepared','machining'].includes(o.status),adjustable=working&&!spinning;
  const report=p&&o.measured?qualityReport(o,j):null;
  const btn=(a,t,disabled=false)=>`<button class="shop-button" data-work="${a}" ${disabled?'disabled':''}>${t}</button>`;
- if(!p)return '<div class="lathe-extras"><p>Wähle am Materialständer einen Rohling und lege am Wagen das Werkzeug bereit.</p><button class="shop-button" data-station="rack">Zum Materialständer →</button></div>';
+ if(!p)return `<div class="lathe-console">${latheStage(w,o,j)}</div><div class="lathe-extras"><p>Wähle am Materialständer einen Rohling und lege am Wagen das Werkzeug bereit.</p><button class="shop-button" data-station="rack">Zum Materialständer →</button></div>`;
  return `<div class="lathe-console">
- <div id="machine-live">${machineReadout(w,o,j)}</div>
+ ${latheStage(w,o,j)}
  <div class="direct-controls" aria-label="Direkte Drehbankbedienung">
  <div class="operation-row">${['turn','face'].map(mode=>`<button data-work="operation" data-arg="${mode}" aria-pressed="${p.operation===mode}" ${adjustable?'':'disabled'}>${mode==='turn'?'Längsdrehen':'Plandrehen'}</button>`).join('')}</div>
  <div class="drive-row"><button type="button" data-feed="-1" ${spinning?'':'disabled'} aria-label="Vorschub nach links halten">◀ ${face?'X−':'Z−'} <small>halten</small></button>${engaged?btn('pause',o.paused?'● Spindel an':'■ Spindel aus'):btn('start','● Spindel an',!working)}<button type="button" data-feed="1" ${spinning?'':'disabled'} aria-label="Vorschub nach rechts halten">${face?'X+':'Z+'} ▶ <small>halten</small></button></div>

@@ -1,7 +1,7 @@
-import { qualityReport, rewardFor, CUTTERS } from './machining.js?v=007';
-import { latheControls } from './lathe-ui.js?v=007';
-import { JOBS, MATERIALS, activeOrder, jobFor, nextTask, inTolerance } from './workshop-state.js?v=007';
-import { SCENE_DEFS, ROOM_SHELL, OBJECT_ART } from './scene.js?v=007';
+import { qualityReport, rewardFor, CUTTERS } from './machining.js?v=008';
+import { latheControls } from './lathe-ui.js?v=008';
+import { JOBS, MATERIALS, activeOrder, jobFor, nextTask, inTolerance } from './workshop-state.js?v=008';
+import { SCENE_DEFS, ROOM_SHELL, OBJECT_ART } from './scene.js?v=008';
 export const STATIONS={desk:'Schreibtisch · Aufträge',storage:'Regal · Lager',lathe:'Drehbank',tools:'Werkzeugschrank',rack:'Materialständer',cart:'Werkzeugwagen',vise:'Schraubstock',measure:'Messschieber',radio:'Radio',clean:'Späneeimer & Besen',build:'Bauplan · Ausbau',cat:'Späne',drill:'Standbohrmaschine'};
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const euro=n=>new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR',maximumFractionDigits:0}).format(n);
